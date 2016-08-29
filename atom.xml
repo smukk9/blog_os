@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>Posts on Writing an OS in Rust</title>
-    <link>http://os.phil-opp.com/post.html</link>
-    <description>Recent content in Posts on Writing an OS in Rust</description>
+    <title>Writing an OS in Rust</title>
+    <link>http://os.phil-opp.com/</link>
+    <description>Recent content on Writing an OS in Rust</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <managingEditor>dev@phil-opp.com (Philipp Oppermann)</managingEditor>
     <webMaster>dev@phil-opp.com (Philipp Oppermann)</webMaster>
     <copyright>&amp;copy; 2016. All rights reserved.</copyright>
     <lastBuildDate>Wed, 03 Aug 2016 00:00:00 +0000</lastBuildDate>
-    <atom:link href="http://os.phil-opp.com/post/atom.xml" rel="self" type="application/rss+xml" />
+    <atom:link href="http://os.phil-opp.com/atom.xml" rel="self" type="application/rss+xml" />
     
     <item>
       <title>Better Exception Messages</title>
