@@ -77,11 +77,9 @@
     
   </time>
 
-  
+  <p>In the <a href="/multiboot-kernel.html">previous post</a> we created a minimal multiboot kernel. It just prints <code>OK</code> and hangs. The goal is to extend it and call 64-bit <a href="https://www.rust-lang.org/">Rust</a> code. But the CPU is currently in <a href="https://en.wikipedia.org/wiki/Protected_mode">protected mode</a> and allows only 32-bit instructions and up to 4GiB memory. So we need to set up <em>Paging</em> and switch to the 64-bit <a href="https://en.wikipedia.org/wiki/Long_mode">long mode</a> first.</p>
 
-<p>In the <a href="/multiboot-kernel.html">previous post</a> we created a minimal multiboot kernel. It just prints <code>OK</code> and hangs. The goal is to extend it and call 64-bit <a href="https://www.rust-lang.org/">Rust</a> code. But the CPU is currently in <a href="https://en.wikipedia.org/wiki/Protected_mode">protected mode</a> and allows only 32-bit instructions and up to 4GiB memory. So we need to set up <em>Paging</em> and switch to the 64-bit <a href="https://en.wikipedia.org/wiki/Long_mode">long mode</a> first.</p>
-
-<aside id="toc"></aside>
+<p><aside id="toc"></aside></p>
 
 <p>I tried to explain everything in detail and to keep the code as simple as possible. If you have any questions, suggestions, or issues, please leave a comment or <a href="https://github.com/phil-opp/blog_os/issues">create an issue</a> on Github. The source code is available in a <a href="https://github.com/phil-opp/blog_os/tree/entering_longmode/src/arch/x86_64">repository</a>, too.</p>
 
@@ -717,7 +715,6 @@ The Global Descriptor Table (GDT) was used for <em>Segmentation</em> in old oper
  <a class="footnote-return" href="#fnref:leave-assembly-behind"><sup>[return]</sup></a></li>
 </ol>
 </div>
-
 </article>
 
 <hr>

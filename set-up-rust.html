@@ -77,11 +77,9 @@
     
   </time>
 
-  
+  <p>In the previous posts we created a <a href="/multiboot-kernel.html">minimal Multiboot kernel</a> and <a href="/entering-longmode.html">switched to Long Mode</a>. Now we can finally switch to <a href="https://www.rust-lang.org/">Rust</a> code. Rust is a high-level language without runtime. It allows us to not link the standard library and write bare metal code. Unfortunately the setup is not quite hassle-free yet.</p>
 
-<p>In the previous posts we created a <a href="/multiboot-kernel.html">minimal Multiboot kernel</a> and <a href="/entering-longmode.html">switched to Long Mode</a>. Now we can finally switch to <a href="https://www.rust-lang.org/">Rust</a> code. Rust is a high-level language without runtime. It allows us to not link the standard library and write bare metal code. Unfortunately the setup is not quite hassle-free yet.</p>
-
-<aside id="toc"></aside>
+<p><aside id="toc"></aside></p>
 
 <p>This blog post tries to set up Rust step-by-step and point out the different problems. If you have any questions, problems, or suggestions please <a href="https://github.com/phil-opp/blog_os/issues">file an issue</a> or create a comment at the bottom. The code from this post is in a <a href="https://github.com/phil-opp/blog_os/tree/set_up_rust">Github repository</a>, too.</p>
 
@@ -432,7 +430,6 @@ check_exception old: 0x8 new 0xd
  <a class="footnote-return" href="#fnref:fn-libcore-unwind"><sup>[return]</sup></a></li>
 </ol>
 </div>
-
 </article>
 
 <hr>

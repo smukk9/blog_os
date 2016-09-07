@@ -75,11 +75,9 @@
     
   </time>
 
-  
+  <p>In the previous posts we have created a <a href="/allocating-frames.html">frame allocator</a> and a <a href="/modifying-page-tables.html">page table module</a>. Now we are ready to create a kernel heap and a memory allocator. Thus, we will unlock <code>Box</code>, <code>Vec</code>, <code>BTreeMap</code>, and the rest of the <a href="https://doc.rust-lang.org/nightly/alloc/index.html">alloc</a> and <a href="https://doc.rust-lang.org/nightly/collections/index.html">collections</a> crates.</p>
 
-<p>In the previous posts we have created a <a href="/allocating-frames.html">frame allocator</a> and a <a href="/modifying-page-tables.html">page table module</a>. Now we are ready to create a kernel heap and a memory allocator. Thus, we will unlock <code>Box</code>, <code>Vec</code>, <code>BTreeMap</code>, and the rest of the <a href="https://doc.rust-lang.org/nightly/alloc/index.html">alloc</a> and <a href="https://doc.rust-lang.org/nightly/collections/index.html">collections</a> crates.</p>
-
-<aside id="toc"></aside>
+<p><aside id="toc"></aside></p>
 
 <p>As always, you can find the complete source code on <a href="https://github.com/phil-opp/blog_os/tree/kernel_heap">Github</a>. Please file <a href="https://github.com/phil-opp/blog_os/issues">issues</a> for any problems, questions, or improvement suggestions. There is also a comment section at the end of this page.</p>
 
@@ -810,7 +808,6 @@ in memory::init in src/memory/mod.rs:
  <a class="footnote-return" href="#fnref:1"><sup>[return]</sup></a></li>
 </ol>
 </div>
-
 </article>
 
 <hr>

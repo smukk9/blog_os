@@ -96,7 +96,6 @@
 
   <p>This post explains how to create a minimal x86 operating system kernel. In fact, it will just boot and print <code>OK</code> to the screen. The following blog posts we will extend it using the <a href="http://www.rust-lang.org/">Rust</a> programming language.</p>
 
-
 </article>
 
   
@@ -107,8 +106,7 @@
     </a>
   </h1>
 
-  <p>In the <a href="/multiboot-kernel.html">previous post</a> we created a minimal multiboot kernel. It just prints <code>OK</code> and hangs. The goal is to extend it and call 64-bit <a href="http://www.rust-lang.org/">Rust</a> code. But the CPU is currently in <a href="https://en.wikipedia.org/wiki/Protected_mode">protected mode</a> and allows only 32-bit instructions and up to 4GiB memory. So we need to set up <em>Paging</em> and switch to the 64-bit <a href="https://en.wikipedia.org/wiki/Long_mode">long mode</a> first.</p>
-
+  <p>In the <a href="/multiboot-kernel.html">previous post</a> we created a minimal multiboot kernel. It just prints <code>OK</code> and hangs. The goal is to extend it and call 64-bit <a href="https://www.rust-lang.org/">Rust</a> code. But the CPU is currently in <a href="https://en.wikipedia.org/wiki/Protected_mode">protected mode</a> and allows only 32-bit instructions and up to 4GiB memory. So we need to set up <em>Paging</em> and switch to the 64-bit <a href="https://en.wikipedia.org/wiki/Long_mode">long mode</a> first.</p>
 
 </article>
 
@@ -122,7 +120,6 @@
 
   <p>In the previous posts we created a <a href="/multiboot-kernel.html">minimal Multiboot kernel</a> and <a href="/entering-longmode.html">switched to Long Mode</a>. Now we can finally switch to <a href="https://www.rust-lang.org/">Rust</a> code. Rust is a high-level language without runtime. It allows us to not link the standard library and write bare metal code. Unfortunately the setup is not quite hassle-free yet.</p>
 
-
 </article>
 
   
@@ -134,7 +131,6 @@
   </h1>
 
   <p>In the <a href="/set-up-rust.html">previous post</a> we switched from assembly to <a href="https://www.rust-lang.org/">Rust</a>, a systems programming language that provides great safety. But so far we are using unsafe features like <a href="https://doc.rust-lang.org/book/raw-pointers.html">raw pointers</a> whenever we want to print to screen. In this post we will create a Rust module that provides a safe and easy-to-use interface for the VGA text buffer. It will support Rust&rsquo;s <a href="https://doc.rust-lang.org/std/fmt/#related-macros">formatting macros</a>, too.</p>
-
 
 </article>
 
@@ -153,7 +149,6 @@
 
   <p>In this post we create an allocator that provides free physical frames for a future paging module. To get the required information about available and used memory we use the Multiboot information structure. Additionally, we improve the <code>panic</code> handler to print the corresponding message and source line.</p>
 
-
 </article>
 
   
@@ -165,7 +160,6 @@
   </h1>
 
   <p>In this post we will create a paging module, which allows us to access and modify the 4-level page table. We will explore recursive page table mapping and use some Rust features to make it safe. Finally we will create functions to translate virtual addresses and to map and unmap pages.</p>
-
 
 </article>
 
@@ -179,7 +173,6 @@
 
   <p>In this post we will create a new page table to map the kernel sections correctly. Therefore we will extend the paging module to support modifications of <em>inactive</em> page tables as well. Then we will switch to the new table and secure our kernel stack by creating a guard page.</p>
 
-
 </article>
 
   
@@ -191,7 +184,6 @@
   </h1>
 
   <p>In the previous posts we have created a <a href="/allocating-frames.html">frame allocator</a> and a <a href="/modifying-page-tables.html">page table module</a>. Now we are ready to create a kernel heap and a memory allocator. Thus, we will unlock <code>Box</code>, <code>Vec</code>, <code>BTreeMap</code>, and the rest of the <a href="https://doc.rust-lang.org/nightly/alloc/index.html">alloc</a> and <a href="https://doc.rust-lang.org/nightly/collections/index.html">collections</a> crates.</p>
-
 
 </article>
 
@@ -210,7 +202,6 @@
 
   <p>In this post, we start exploring exceptions. We set up an interrupt descriptor table and add handler functions. At the end of this post, our kernel will be able to catch divide-by-zero faults.</p>
 
-
 </article>
 
   
@@ -222,7 +213,6 @@
   </h1>
 
   <p>In this post, we explore exceptions in more detail. Our goal is to print additional information when an exception occurs, for example the values of the instruction and stack pointer. In the course of this, we will explore inline assembly and naked functions. We will also add a handler function for page faults and read the associated error code.</p>
-
 
 </article>
 

@@ -75,11 +75,9 @@
     
   </time>
 
-  
+  <p>In this post we will create a paging module, which allows us to access and modify the 4-level page table. We will explore recursive page table mapping and use some Rust features to make it safe. Finally we will create functions to translate virtual addresses and to map and unmap pages.</p>
 
-<p>In this post we will create a paging module, which allows us to access and modify the 4-level page table. We will explore recursive page table mapping and use some Rust features to make it safe. Finally we will create functions to translate virtual addresses and to map and unmap pages.</p>
-
-<aside id="toc"></aside>
+<p><aside id="toc"></aside></p>
 
 <p>You can find the source code and this post itself on <a href="https://github.com/phil-opp/blog_os/tree/page_tables">Github</a>. Please file an issue there if you have any problems or improvement suggestions. There is also a comment section at the end of this page. Note that this post requires a current Rust nightly.</p>
 
@@ -1070,7 +1068,6 @@ next free frame: Some(Frame { number: 3 })
  <a class="footnote-return" href="#fnref:virtual-physical-translation-source"><sup>[return]</sup></a></li>
 </ol>
 </div>
-
 </article>
 
 <hr>
