@@ -77,9 +77,11 @@
     
   </time>
 
-  <p>In this post we will create a new page table to map the kernel sections correctly. Therefore we will extend the paging module to support modifications of <em>inactive</em> page tables as well. Then we will switch to the new table and secure our kernel stack by creating a guard page.</p>
+  
 
-<p><aside id="toc"></aside></p>
+<p>In this post we will create a new page table to map the kernel sections correctly. Therefore we will extend the paging module to support modifications of <em>inactive</em> page tables as well. Then we will switch to the new table and secure our kernel stack by creating a guard page.</p>
+
+<aside id="toc"></aside>
 
 <p>As always, you can find the source code on <a href="https://github.com/phil-opp/blog_os/tree/remap_the_kernel">Github</a>. Don&rsquo;t hesitate to file issues there if you have any problems or improvement suggestions. There is also a comment section at the end of this page. Note that this post requires a current Rust nightly.</p>
 
@@ -1098,6 +1100,7 @@ check_exception old: 0xffffffff new 0xe
  <a class="footnote-return" href="#fnref:fn-apt-renamed"><sup>[return]</sup></a></li>
 </ol>
 </div>
+
 </article>
 
 <hr>
