@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
+    
     <title>Writing an OS in Rust</title>
     <link>http://os.phil-opp.com/atom.xml</link>
     <description>Recent content on Writing an OS in Rust</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
-    <managingEditor>dev@phil-opp.com (Philipp Oppermann)</managingEditor>
-    <webMaster>dev@phil-opp.com (Philipp Oppermann)</webMaster>
     <copyright>&amp;copy; 2016. All rights reserved.</copyright>
     <lastBuildDate>Wed, 03 Aug 2016 00:00:00 +0000</lastBuildDate>
     <atom:link href="/atom.xml" rel="self" type="application/rss+xml" />
@@ -16,7 +15,7 @@
       <title>Better Exception Messages</title>
       <link>http://os.phil-opp.com/better-exception-messages.html</link>
       <pubDate>Wed, 03 Aug 2016 00:00:00 +0000</pubDate>
-      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      
       <guid>http://os.phil-opp.com/better-exception-messages.html</guid>
       <description>&lt;p&gt;In this post, we explore exceptions in more detail. Our goal is to print additional information when an exception occurs, for example the values of the instruction and stack pointer. In the course of this, we will explore inline assembly and naked functions. We will also add a handler function for page faults and read the associated error code.&lt;/p&gt;
 
@@ -639,7 +638,7 @@ RSI=[...] RDI=[...] RBP=0000000000118d28 RSP=[...]
       <title>Catching Exceptions</title>
       <link>http://os.phil-opp.com/catching-exceptions.html</link>
       <pubDate>Sat, 28 May 2016 00:00:00 +0000</pubDate>
-      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      
       <guid>http://os.phil-opp.com/catching-exceptions.html</guid>
       <description>&lt;p&gt;In this post, we start exploring exceptions. We set up an interrupt descriptor table and add handler functions. At the end of this post, our kernel will be able to catch divide-by-zero faults.&lt;/p&gt;
 
@@ -1379,7 +1378,7 @@ Remote debugging using :1234
       <title>Kernel Heap</title>
       <link>http://os.phil-opp.com/kernel-heap.html</link>
       <pubDate>Mon, 11 Apr 2016 00:00:00 +0000</pubDate>
-      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      
       <guid>http://os.phil-opp.com/kernel-heap.html</guid>
       <description>&lt;p&gt;In the previous posts we have created a &lt;a href=&#34;http://os.phil-opp.com/allocating-frames.html&#34;&gt;frame allocator&lt;/a&gt; and a &lt;a href=&#34;http://os.phil-opp.com/modifying-page-tables.html&#34;&gt;page table module&lt;/a&gt;. Now we are ready to create a kernel heap and a memory allocator. Thus, we will unlock &lt;code&gt;Box&lt;/code&gt;, &lt;code&gt;Vec&lt;/code&gt;, &lt;code&gt;BTreeMap&lt;/code&gt;, and the rest of the &lt;a href=&#34;https://doc.rust-lang.org/nightly/alloc/index.html&#34;&gt;alloc&lt;/a&gt; and &lt;a href=&#34;https://doc.rust-lang.org/nightly/collections/index.html&#34;&gt;collections&lt;/a&gt; crates.&lt;/p&gt;
 
@@ -2120,7 +2119,7 @@ in memory::init in src/memory/mod.rs:
       <title>Remap the Kernel</title>
       <link>http://os.phil-opp.com/remap-the-kernel.html</link>
       <pubDate>Fri, 01 Jan 2016 00:00:00 +0000</pubDate>
-      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      
       <guid>http://os.phil-opp.com/remap-the-kernel.html</guid>
       <description>&lt;p&gt;In this post we will create a new page table to map the kernel sections correctly. Therefore we will extend the paging module to support modifications of &lt;em&gt;inactive&lt;/em&gt; page tables as well. Then we will switch to the new table and secure our kernel stack by creating a guard page.&lt;/p&gt;
 
@@ -3149,7 +3148,7 @@ check_exception old: 0xffffffff new 0xe
       <title>Page Tables</title>
       <link>http://os.phil-opp.com/modifying-page-tables.html</link>
       <pubDate>Wed, 09 Dec 2015 00:00:00 +0000</pubDate>
-      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      
       <guid>http://os.phil-opp.com/modifying-page-tables.html</guid>
       <description>&lt;p&gt;In this post we will create a paging module, which allows us to access and modify the 4-level page table. We will explore recursive page table mapping and use some Rust features to make it safe. Finally we will create functions to translate virtual addresses and to map and unmap pages.&lt;/p&gt;
 
@@ -4150,7 +4149,7 @@ next free frame: Some(Frame { number: 3 })
       <title>Allocating Frames</title>
       <link>http://os.phil-opp.com/allocating-frames.html</link>
       <pubDate>Sun, 15 Nov 2015 00:00:00 +0000</pubDate>
-      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      
       <guid>http://os.phil-opp.com/allocating-frames.html</guid>
       <description>&lt;p&gt;In this post we create an allocator that provides free physical frames for a future paging module. To get the required information about available and used memory we use the Multiboot information structure. Additionally, we improve the &lt;code&gt;panic&lt;/code&gt; handler to print the corresponding message and source line.&lt;/p&gt;
 
@@ -4554,7 +4553,7 @@ multiboot_start: 0x11d400, multiboot_end: 0x11d9c8
       <title>Printing to Screen</title>
       <link>http://os.phil-opp.com/printing-to-screen.html</link>
       <pubDate>Fri, 23 Oct 2015 00:00:00 +0000</pubDate>
-      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      
       <guid>http://os.phil-opp.com/printing-to-screen.html</guid>
       <description>&lt;p&gt;In the &lt;a href=&#34;http://os.phil-opp.com/set-up-rust.html&#34;&gt;previous post&lt;/a&gt; we switched from assembly to &lt;a href=&#34;https://www.rust-lang.org/&#34;&gt;Rust&lt;/a&gt;, a systems programming language that provides great safety. But so far we are using unsafe features like &lt;a href=&#34;https://doc.rust-lang.org/book/raw-pointers.html&#34;&gt;raw pointers&lt;/a&gt; whenever we want to print to screen. In this post we will create a Rust module that provides a safe and easy-to-use interface for the VGA text buffer. It will support Rust&amp;rsquo;s &lt;a href=&#34;https://doc.rust-lang.org/std/fmt/#related-macros&#34;&gt;formatting macros&lt;/a&gt;, too.&lt;/p&gt;
 
@@ -5050,7 +5049,7 @@ multiboot_start: 0x11d400, multiboot_end: 0x11d9c8
       <title>Set Up Rust</title>
       <link>http://os.phil-opp.com/set-up-rust.html</link>
       <pubDate>Wed, 02 Sep 2015 00:00:00 +0000</pubDate>
-      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      
       <guid>http://os.phil-opp.com/set-up-rust.html</guid>
       <description>&lt;p&gt;In the previous posts we created a &lt;a href=&#34;http://os.phil-opp.com/multiboot-kernel.html&#34;&gt;minimal Multiboot kernel&lt;/a&gt; and &lt;a href=&#34;http://os.phil-opp.com/entering-longmode.html&#34;&gt;switched to Long Mode&lt;/a&gt;. Now we can finally switch to &lt;a href=&#34;https://www.rust-lang.org/&#34;&gt;Rust&lt;/a&gt; code. Rust is a high-level language without runtime. It allows us to not link the standard library and write bare metal code. Unfortunately the setup is not quite hassle-free yet.&lt;/p&gt;
 
@@ -5411,7 +5410,7 @@ check_exception old: 0x8 new 0xd
       <title>Entering Long Mode</title>
       <link>http://os.phil-opp.com/entering-longmode.html</link>
       <pubDate>Tue, 25 Aug 2015 00:00:00 +0000</pubDate>
-      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      
       <guid>http://os.phil-opp.com/entering-longmode.html</guid>
       <description>&lt;p&gt;In the &lt;a href=&#34;http://os.phil-opp.com/multiboot-kernel.html&#34;&gt;previous post&lt;/a&gt; we created a minimal multiboot kernel. It just prints &lt;code&gt;OK&lt;/code&gt; and hangs. The goal is to extend it and call 64-bit &lt;a href=&#34;https://www.rust-lang.org/&#34;&gt;Rust&lt;/a&gt; code. But the CPU is currently in &lt;a href=&#34;https://en.wikipedia.org/wiki/Protected_mode&#34;&gt;protected mode&lt;/a&gt; and allows only 32-bit instructions and up to 4GiB memory. So we need to set up &lt;em&gt;Paging&lt;/em&gt; and switch to the 64-bit &lt;a href=&#34;https://en.wikipedia.org/wiki/Long_mode&#34;&gt;long mode&lt;/a&gt; first.&lt;/p&gt;
 
@@ -6057,7 +6056,7 @@ The Global Descriptor Table (GDT) was used for &lt;em&gt;Segmentation&lt;/em&gt;
       <title>A minimal x86 kernel</title>
       <link>http://os.phil-opp.com/multiboot-kernel.html</link>
       <pubDate>Tue, 18 Aug 2015 00:00:00 +0000</pubDate>
-      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      
       <guid>http://os.phil-opp.com/multiboot-kernel.html</guid>
       <description>&lt;p&gt;This post explains how to create a minimal x86 operating system kernel. In fact, it will just boot and print &lt;code&gt;OK&lt;/code&gt; to the screen. The following blog posts we will extend it using the &lt;a href=&#34;http://www.rust-lang.org/&#34;&gt;Rust&lt;/a&gt; programming language.&lt;/p&gt;
 
