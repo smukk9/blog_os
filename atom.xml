@@ -9,8 +9,917 @@
     <managingEditor>dev@phil-opp.com (Philipp Oppermann)</managingEditor>
     <webMaster>dev@phil-opp.com (Philipp Oppermann)</webMaster>
     <copyright>&amp;copy; 2016. All rights reserved.</copyright>
-    <lastBuildDate>Wed, 03 Aug 2016 00:00:00 +0000</lastBuildDate>
+    <lastBuildDate>Sat, 06 Aug 2016 00:00:00 +0000</lastBuildDate>
     <atom:link href="http://os.phil-opp.com/atom.xml" rel="self" type="application/rss+xml" />
+    
+    <item>
+      <title>Returning from Exceptions</title>
+      <link>http://os.phil-opp.com/returning-from-exceptions.html</link>
+      <pubDate>Sat, 06 Aug 2016 00:00:00 +0000</pubDate>
+      <author>dev@phil-opp.com (Philipp Oppermann)</author>
+      <guid>http://os.phil-opp.com/returning-from-exceptions.html</guid>
+      <description>
+
+&lt;p&gt;In this post, we learn how to return from exceptions correctly. In the course of this, we will explore the &lt;code&gt;iretq&lt;/code&gt; instruction, the C calling convention, multimedia registers, and the red zone.&lt;/p&gt;
+
+&lt;aside id=&#34;toc&#34;&gt;&lt;/aside&gt;
+
+&lt;p&gt;As always, the complete source code is on &lt;a href=&#34;https://github.com/phil-opp/blog_os/tree/returning_from_exceptions&#34;&gt;Github&lt;/a&gt;. Please file &lt;a href=&#34;https://github.com/phil-opp/blog_os/issues&#34;&gt;issues&lt;/a&gt; for any problems, questions, or improvement suggestions. There is also a &lt;a href=&#34;https://gitter.im/phil-opp/blog_os&#34;&gt;gitter chat&lt;/a&gt; and a &lt;a href=&#34;#disqus_thread&#34;&gt;comment section&lt;/a&gt; at the end of this page.&lt;/p&gt;
+
+&lt;h2 id=&#34;introduction&#34;&gt;Introduction&lt;/h2&gt;
+
+&lt;p&gt;Most exceptions are fatal and can&amp;rsquo;t be resolved. For example, we can&amp;rsquo;t return from a divide-by-zero exception in a reasonable way. However, there are some exceptions that we can resolve:&lt;/p&gt;
+
+&lt;p&gt;Imagine a system that uses &lt;a href=&#34;https://en.wikipedia.org/wiki/Memory-mapped_file&#34;&gt;memory mapped files&lt;/a&gt;: We map a file into the virtual address space without loading it into memory. Whenever we access a part of the file for the first time, a page fault occurs. However, this page fault is not fatal. We can resolve it by loading the corresponding page from disk into memory and setting the &lt;code&gt;present&lt;/code&gt; flag in the page table. Then we can return from the page fault handler and restart the failed instruction, which now successfully accesses the file data.&lt;/p&gt;
+
+&lt;p&gt;Memory mapped files are completely out of scope for us right now (we have neither a file concept nor a hard disk driver). So we need an exception that we can resolve easily so that we can return from it in a reasonable way. Fortunately, there is an exception that needs no resolution at all: the breakpoint exception.&lt;/p&gt;
+
+&lt;h2 id=&#34;the-breakpoint-exception&#34;&gt;The Breakpoint Exception&lt;/h2&gt;
+
+&lt;p&gt;The breakpoint exception is the perfect exception to test our upcoming return-from-exception logic. Its only purpose is to temporary pause a program when the breakpoint instruction &lt;code&gt;int3&lt;/code&gt; is executed.&lt;/p&gt;
+
+&lt;p&gt;The breakpoint exception is commonly used in debuggers: When the user sets a breakpoint, the debugger overwrites the corresponding instruction with the &lt;code&gt;int3&lt;/code&gt; instruction so that the CPU throws the breakpoint exception when it reaches that line. When the user wants to continue the program, the debugger replaces the &lt;code&gt;int3&lt;/code&gt; instruction with the original instruction again and continues the program. For more details, see the &lt;a href=&#34;http://eli.thegreenplace.net/2011/01/27/how-debuggers-work-part-2-breakpoints&#34;&gt;How debuggers work&lt;/a&gt; series.&lt;/p&gt;
+
+&lt;p&gt;For our use case, we don&amp;rsquo;t need to overwrite any instructions (it wouldn&amp;rsquo;t even be possible since we &lt;a href=&#34;http://os.phil-opp.com/remap-the-kernel.html#using-the-correct-flags&#34;&gt;set the page table flags&lt;/a&gt; to read-only). Instead, we just want to print a message when the breakpoint instruction is executed and then continue the program.&lt;/p&gt;
+
+&lt;h3 id=&#34;catching-breakpoints&#34;&gt;Catching Breakpoints&lt;/h3&gt;
+
+&lt;p&gt;Let&amp;rsquo;s start by defining a handler function for the breakpoint exception:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/interrupts/mod.rs&lt;/span&gt;
+
+&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;break&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;point_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;stack_frame&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;kr&#34;&gt;const&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ExceptionStackFrame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;print_error&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;format_args&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;EXCEPTION: BREAKPOINT at {:#x}&lt;/span&gt;&lt;span class=&#34;se&#34;&gt;\n&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;{:#?}&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                                 &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;stack_frame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;).&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;instruction_pointer&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                                 &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;stack_frame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;));&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;loop&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;We print a red error message using &lt;code&gt;print_error&lt;/code&gt; and also output the instruction pointer and the rest of the stack frame. Note that this function does &lt;em&gt;not&lt;/em&gt; return yet, since our &lt;code&gt;handler!&lt;/code&gt; macro still requires a diverging function.&lt;/p&gt;
+
+&lt;p&gt;We need to register our new handler function in the interrupt descriptor table (IDT):&lt;/p&gt;
+
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/interrupts/mod.rs&lt;/span&gt;
+
+&lt;span class=&#34;n&#34;&gt;lazy_static&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;static&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;ref&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;IDT&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;idt&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;Idt&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;kd&#34;&gt;let&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;mut&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;idt&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;idt&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;Idt&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;new&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;idt&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;.&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;set_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;0&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;handler&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;divide_by_zero_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;));&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;idt&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;.&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;set_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;3&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;handler&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;k&#34;&gt;break&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;point_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;));&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// new&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;idt&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;.&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;set_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;6&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;handler&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;invalid_opcode_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;));&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;idt&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;.&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;set_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;14&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;handler_with_error_code&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;page_fault_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;));&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;idt&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;};&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;We set the IDT entry with number 3 since it&amp;rsquo;s the vector number of the breakpoint exception.&lt;/p&gt;
+
+&lt;h4 id=&#34;testing-it&#34;&gt;Testing it&lt;/h4&gt;
+
+&lt;p&gt;In order to test it, we insert an &lt;code&gt;int3&lt;/code&gt; instruction in our &lt;code&gt;rust_main&lt;/code&gt;:&lt;/p&gt;
+
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/lib.rs&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;...&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;cp&#34;&gt;#[macro_use]&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// needed for the `int!` macro&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;crate&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;x86&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;...&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;cp&#34;&gt;#[no_mangle]&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;k&#34;&gt;pub&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;rust_main&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(...)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;...&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;interrupts&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;init&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// trigger a breakpoint exception&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;int&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;3&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;};&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;println&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;It did not crash!&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;loop&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;When we execute &lt;code&gt;make run&lt;/code&gt;, we see the following:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&#34;images/qemu-breakpoint-handler.png&#34; alt=&#34;QEMU showing `EXCEPTION: BREAKPOINT at 0x1100aa` and a dump of the exception stack frame&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;It works! Now we “just” need to return from the breakpoint handler somehow so that we see the &lt;code&gt;It did not crash&lt;/code&gt; message again.&lt;/p&gt;
+
+&lt;h2 id=&#34;returning-from-exceptions&#34;&gt;Returning from Exceptions&lt;/h2&gt;
+
+&lt;p&gt;So how do we return from exceptions? To make it easier, we look at a normal function return first:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&#34;images/function-stack-frame.svg&#34; alt=&#34;function stack frame&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;When calling a function, the &lt;code&gt;call&lt;/code&gt; instruction pushes the return address on the stack. When the called function is finished, it can return to the parent function through the &lt;code&gt;ret&lt;/code&gt; instruction, which pops the return address from the stack and then jumps to it.&lt;/p&gt;
+
+&lt;p&gt;The exception stack frame, in contrast, looks a bit different:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&#34;images/exception-stack-frame.svg&#34; alt=&#34;exception stack frame&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;Instead of pushing a return address, the CPU pushes the stack and instruction pointers (with their segment descriptors), the RFLAGS register, and an optional error code. It also aligns the stack pointer to a 16 byte boundary before pushing values.&lt;/p&gt;
+
+&lt;p&gt;So we can&amp;rsquo;t use a normal &lt;code&gt;ret&lt;/code&gt; instruction, since it expects a different stack frame layout. Instead, there is a special instruction for returning from exceptions: &lt;code&gt;iretq&lt;/code&gt;.&lt;/p&gt;
+
+&lt;h3 id=&#34;the-iretq-instruction&#34;&gt;The &lt;code&gt;iretq&lt;/code&gt; Instruction&lt;/h3&gt;
+
+&lt;p&gt;The &lt;code&gt;iretq&lt;/code&gt; instruction is the one and only way to return from exceptions and is specifically designed for this purpose. The AMD64 manual (&lt;a href=&#34;https://support.amd.com/TechDocs/24594.pdf&#34;&gt;PDF&lt;/a&gt;) even demands that &lt;code&gt;iretq&lt;/code&gt; “&lt;em&gt;must&lt;/em&gt; be used to terminate the exception or interrupt handler associated with the exception”.&lt;/p&gt;
+
+&lt;p&gt;IRETQ restores &lt;code&gt;rip&lt;/code&gt;, &lt;code&gt;cs&lt;/code&gt;, &lt;code&gt;rflags&lt;/code&gt;, &lt;code&gt;rsp&lt;/code&gt;, and &lt;code&gt;cs&lt;/code&gt; from the values saved on the stack and thus continues the interrupted program. The instruction does not handle the optional error code, so it must be popped from the stack before.&lt;/p&gt;
+
+&lt;p&gt;We see that &lt;code&gt;iretq&lt;/code&gt; treats the stored instruction pointer as return address. For most exceptions, the stored &lt;code&gt;rip&lt;/code&gt; points to the instruction that caused the fault. So by executing &lt;code&gt;iretq&lt;/code&gt;, we restart the failing instruction. This makes sense because we should have resolved the exception when returning from it, so the instruction should no longer fail (e.g. the accessed part of the memory mapped file is now present in memory).&lt;/p&gt;
+
+&lt;p&gt;The situation is a bit different for the breakpoint exception, since it needs no resolution. Restarting the &lt;code&gt;int3&lt;/code&gt; instruction wouldn&amp;rsquo;t make sense, since it would cause a new breakpoint exception and we would enter an endless loop. For this reason the hardware designers decided that the stored &lt;code&gt;rip&lt;/code&gt; should point to the next instruction after the &lt;code&gt;int3&lt;/code&gt; instruction.&lt;/p&gt;
+
+&lt;p&gt;Let&amp;rsquo;s check this for our breakpoint handler. Remember, the handler printed the following message (see the image above):&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;EXCEPTION: BREAKPOINT at 0x1100aa
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;So let&amp;rsquo;s disassemble the instruction at &lt;code&gt;0x1100aa&lt;/code&gt; and its predecessor:&lt;/p&gt;
+
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-shell&#34; data-lang=&#34;shell&#34;&gt;&lt;span&gt;&lt;/span&gt;&amp;gt; objdump -d build/kernel-x86_64.bin &lt;span class=&#34;p&#34;&gt;|&lt;/span&gt; grep -B1 &lt;span class=&#34;s2&#34;&gt;&amp;quot;1100aa:&amp;quot;&lt;/span&gt;
+  1100a9:	cc                   	int3
+&lt;span class=&#34;hll&#34;&gt;  1100aa:	&lt;span class=&#34;m&#34;&gt;48&lt;/span&gt; &lt;span class=&#34;m&#34;&gt;89&lt;/span&gt; c6             	mov    %rax,%rsi
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;We see that &lt;code&gt;0x1100aa&lt;/code&gt; indeed points to the next instruction after &lt;code&gt;int3&lt;/code&gt;. So we can simply jump to the stored instruction pointer when we want to return from the breakpoint exception.&lt;/p&gt;
+
+&lt;h3 id=&#34;implementation&#34;&gt;Implementation&lt;/h3&gt;
+
+&lt;p&gt;Let&amp;rsquo;s update our &lt;code&gt;handler!&lt;/code&gt; macro to support non-diverging exception handlers:&lt;/p&gt;
+
+&lt;p&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/interrupts/mod.rs&lt;/span&gt;
+
+&lt;span class=&#34;n&#34;&gt;macro_rules&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;handler&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;$name&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ident&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;#[naked]&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;wrapper&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;mov rdi, rsp&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      sub rsp, 8 // align the stack pointer&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      call $0&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                      &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;i&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;$name&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;as&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                          &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;kr&#34;&gt;const&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ExceptionStackFrame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;))&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// no longer diverging&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;                      &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;rdi&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// new&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;add rsp, 8 // undo stack pointer alignment&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;s&#34;&gt;                      iretq&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                      &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;core&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;intrinsics&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;unreachable&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;wrapper&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;!--end*--&gt;&lt;/p&gt;
+
+&lt;p&gt;When an exception handler returns from the &lt;code&gt;call&lt;/code&gt; instruction, we use the &lt;code&gt;iretq&lt;/code&gt; instruction to continue the interrupted program. Note that we need to undo the stack pointer alignment before, so that &lt;code&gt;rsp&lt;/code&gt; points to the end of the exception stack frame again.&lt;/p&gt;
+
+&lt;p&gt;We&amp;rsquo;ve changed the handler function type, so we need to adjust our existing exception handlers:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-diff&#34; data-lang=&#34;diff&#34;&gt;&lt;span&gt;&lt;/span&gt;// in src/interrupts/mod.rs
+
+extern &amp;quot;C&amp;quot; fn divide_by_zero_handler(
+&lt;span class=&#34;gd&#34;&gt;-   stack_frame: *const ExceptionStackFrame) -&amp;gt; ! {...}&lt;/span&gt;
+&lt;span class=&#34;gi&#34;&gt;+   stack_frame: *const ExceptionStackFrame) {...}&lt;/span&gt;
+
+extern &amp;quot;C&amp;quot; fn invalid_opcode_handler(
+&lt;span class=&#34;gd&#34;&gt;-   stack_frame: *const ExceptionStackFrame) -&amp;gt; ! {...}&lt;/span&gt;
+&lt;span class=&#34;gi&#34;&gt;+   stack_frame: *const ExceptionStackFrame) {...}&lt;/span&gt;
+
+extern &amp;quot;C&amp;quot; fn breakpoint_handler(
+&lt;span class=&#34;gd&#34;&gt;-   stack_frame: *const ExceptionStackFrame) -&amp;gt; ! {&lt;/span&gt;
+&lt;span class=&#34;gi&#34;&gt;+   stack_frame: *const ExceptionStackFrame) {&lt;/span&gt;
+    unsafe { print_error(...) }
+&lt;span class=&#34;gd&#34;&gt;-   loop {}&lt;/span&gt;
+}
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Note that we also removed the &lt;code&gt;loop {}&lt;/code&gt; at the end of our &lt;code&gt;breakpoint_handler&lt;/code&gt; so that it no longer diverges. The &lt;code&gt;divide_by_zero_handler&lt;/code&gt; and the &lt;code&gt;invalid_opcode_handler&lt;/code&gt; still diverge (albeit the new function type would allow a return).&lt;/p&gt;
+
+&lt;h3 id=&#34;testing&#34;&gt;Testing&lt;/h3&gt;
+
+&lt;p&gt;Let&amp;rsquo;s try our new &lt;code&gt;iretq&lt;/code&gt; logic:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&#34;images/qemu-breakpoint-return-page-fault.png&#34; alt=&#34;QEMU output with `EXCEPTION BREAKPOINT` and `EXCEPTION PAG FAULT` but no `It did not crash`&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;Instead of the expected &lt;em&gt;“It did not crash”&lt;/em&gt; message after the breakpoint exception, we get a page fault. The strange thing is that our kernel tried to access address &lt;code&gt;0x0&lt;/code&gt;, which should never happen. So it seems like we messed up something important.&lt;/p&gt;
+
+&lt;h3 id=&#34;debugging&#34;&gt;Debugging&lt;/h3&gt;
+
+&lt;p&gt;Let&amp;rsquo;s debug it using GDB. For that we execute &lt;code&gt;make debug&lt;/code&gt; in one terminal (which starts QEMU with the &lt;code&gt;-s -S&lt;/code&gt; flags) and then &lt;code&gt;make gdb&lt;/code&gt; (which starts and connects GDB) in a second terminal. For more information about GDB debugging, check out our &lt;a href=&#34;http://os.phil-opp.com/set-up-gdb.html&#34;&gt;Set Up GDB&lt;/a&gt; guide.&lt;/p&gt;
+
+&lt;p&gt;First we want to check if our &lt;code&gt;iretq&lt;/code&gt; was successful. Therefore we set a breakpoint on the &lt;code&gt;println!(&amp;quot;It did not crash line!&amp;quot;)&lt;/code&gt; statement in &lt;code&gt;src/lib.rs&lt;/code&gt;. Let&amp;rsquo;s assume that it&amp;rsquo;s on line 61:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;(gdb) break blog_os/src/lib.rs:61
+Breakpoint 1 at 0x110a95: file /home/.../blog_os/src/lib.rs, line 61.
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;This line is after the &lt;code&gt;int3&lt;/code&gt; instruction, so we know that the &lt;code&gt;iretq&lt;/code&gt; succeeded when the breakpoint is hit. To test this, we continue the execution:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;(gdb) continue
+Continuing.
+
+Breakpoint 1, blog_os::rust_main (multiboot_information_address=1539136)
+    at /home/.../blog_os/src/lib.rs:61
+61	    println!(&amp;quot;It did not crash!&amp;quot;);
+
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;It worked! So our kernel successfully returned from the &lt;code&gt;int3&lt;/code&gt; instruction, which means that the &lt;code&gt;iretq&lt;/code&gt; itself works.&lt;/p&gt;
+
+&lt;p&gt;However, when we &lt;code&gt;continue&lt;/code&gt; the execution again, we get the page fault. So the exception occurs somewhere in the &lt;code&gt;println&lt;/code&gt; logic. This means that it occurs in code generated by the compiler (and not e.g. in inline assembly). But the compiler should never access &lt;code&gt;0x0&lt;/code&gt;, so how is this happening?&lt;/p&gt;
+
+&lt;p&gt;The answer is that we&amp;rsquo;ve used the wrong &lt;em&gt;calling convention&lt;/em&gt; for our exception handlers. Thus, we violate some compiler invariants so that the code that works fine without intermediate exceptions starts to violate memory safety when it&amp;rsquo;s executed after a breakpoint exception.&lt;/p&gt;
+
+&lt;h2 id=&#34;calling-conventions&#34;&gt;Calling Conventions&lt;/h2&gt;
+
+&lt;p&gt;Exceptions are quite similar to function calls: The CPU jumps to the first instruction of the (handler) function and executes the function. Afterwards, if the function is not diverging, the CPU jumps to the return address and continues the execution of the parent function.&lt;/p&gt;
+
+&lt;p&gt;However, there is a major difference between exceptions and function calls: A function call is invoked voluntary by a compiler inserted &lt;code&gt;call&lt;/code&gt; instruction, while an exception might occur at &lt;em&gt;any&lt;/em&gt; instruction. In order to understand the consequences of this difference, we need to examine function calls in more detail.&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&#34;https://en.wikipedia.org/wiki/Calling_convention&#34;&gt;Calling conventions&lt;/a&gt; specify the details of a function call. For example, they specify where function parameters are placed (e.g. in registers or on the stack) and how results are returned. On x86_64 Linux, the following rules apply for C functions (specified in the &lt;a href=&#34;http://refspecs.linuxbase.org/elf/x86-64-abi-0.99.pdf&#34;&gt;System V ABI&lt;/a&gt;):&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;the first six integer arguments are passed in registers &lt;code&gt;rdi&lt;/code&gt;, &lt;code&gt;rsi&lt;/code&gt;, &lt;code&gt;rdx&lt;/code&gt;, &lt;code&gt;rcx&lt;/code&gt;, &lt;code&gt;r8&lt;/code&gt;, &lt;code&gt;r9&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;additional arguments are passed on the stack&lt;/li&gt;
+&lt;li&gt;results are returned in &lt;code&gt;rax&lt;/code&gt; and &lt;code&gt;rdx&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;Note that Rust does not follow the C ABI (in fact, &lt;a href=&#34;https://github.com/rust-lang/rfcs/issues/600&#34;&gt;there isn&amp;rsquo;t even a Rust ABI yet&lt;/a&gt;). So these rules apply only to functions declared as &lt;code&gt;extern &amp;quot;C&amp;quot; fn&lt;/code&gt;.&lt;/p&gt;
+
+&lt;h3 id=&#34;preserved-and-scratch-registers&#34;&gt;Preserved and Scratch Registers&lt;/h3&gt;
+
+&lt;p&gt;The calling convention divides the registers in two parts: &lt;em&gt;preserved&lt;/em&gt; and &lt;em&gt;scratch&lt;/em&gt; registers.&lt;/p&gt;
+
+&lt;p&gt;The values of the preserved register must remain unchanged across function calls. So a called function (the &lt;em&gt;“callee”&lt;/em&gt;) is only allowed to overwrite these registers if it restores their original values before returning. Therefore these registers are called &lt;em&gt;“callee-saved”&lt;/em&gt;. A common pattern is to save these registers to the stack at the function&amp;rsquo;s beginning and restore them just before returning.&lt;/p&gt;
+
+&lt;p&gt;In contrast, a called function is allowed to overwrite scratch registers without restrictions. If the caller wants to preserve the value of a scratch register across a function call, it needs to backup and restore it (e.g. by pushing it to the stack before the function call). So the scratch registers are &lt;em&gt;caller-saved&lt;/em&gt;.&lt;/p&gt;
+
+&lt;p&gt;On x86_64, the C calling convention specifies the following preserved and scratch registers:&lt;/p&gt;
+
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;preserved registers&lt;/th&gt;
+&lt;th&gt;scratch registers&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;rbp&lt;/code&gt;, &lt;code&gt;rbx&lt;/code&gt;, &lt;code&gt;rsp&lt;/code&gt;, &lt;code&gt;r12&lt;/code&gt;, &lt;code&gt;r13&lt;/code&gt;, &lt;code&gt;r14&lt;/code&gt;, &lt;code&gt;r15&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;rax&lt;/code&gt;, &lt;code&gt;rcx&lt;/code&gt;, &lt;code&gt;rdx&lt;/code&gt;, &lt;code&gt;rsi&lt;/code&gt;, &lt;code&gt;rdi&lt;/code&gt;, &lt;code&gt;r8&lt;/code&gt;, &lt;code&gt;r9&lt;/code&gt;, &lt;code&gt;r10&lt;/code&gt;, &lt;code&gt;r11&lt;/code&gt;&lt;/td&gt;
+&lt;/tr&gt;
+
+&lt;tr&gt;
+&lt;td&gt;&lt;em&gt;callee-saved&lt;/em&gt;&lt;/td&gt;
+&lt;td&gt;&lt;em&gt;caller-saved&lt;/em&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;The compiler knows these rules, so it generates the code accordingly. For example, most functions begin with a &lt;code&gt;push rbp&lt;/code&gt;, which backups &lt;code&gt;rbp&lt;/code&gt; on the stack (because it&amp;rsquo;s a callee-saved register).&lt;/p&gt;
+
+&lt;h3 id=&#34;the-exception-calling-convention&#34;&gt;The Exception Calling Convention&lt;/h3&gt;
+
+&lt;p&gt;In contrast to function calls, exceptions can occur on &lt;em&gt;any&lt;/em&gt; instruction. In most cases we don&amp;rsquo;t even know at compile time if the generated code will cause an exception. For example, the compiler can&amp;rsquo;t know if an instruction causes a stack overflow or an other page fault.&lt;/p&gt;
+
+&lt;p&gt;Since we don&amp;rsquo;t know when an exception occurs, we can&amp;rsquo;t backup any registers before. This means that we can&amp;rsquo;t use a calling convention that relies on caller-saved registers for our exception handlers. But we do so at the moment: Our exception handlers are declared as &lt;code&gt;extern &amp;quot;C&amp;quot; fn&lt;/code&gt; and thus use the C calling convention.&lt;/p&gt;
+
+&lt;p&gt;So here is what happens:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;rust_main&lt;/code&gt; is executing; it writes some memory address into &lt;code&gt;rax&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;The &lt;code&gt;int3&lt;/code&gt; instruction causes a breakpoint exception.&lt;/li&gt;
+&lt;li&gt;Our &lt;code&gt;breakpoint_handler&lt;/code&gt; prints to the screen and assumes that it can overwrite &lt;code&gt;rax&lt;/code&gt; freely (since it&amp;rsquo;s a scratch register). Somehow the value &lt;code&gt;0&lt;/code&gt; ends up in &lt;code&gt;rax&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;We return from the breakpoint exception using &lt;code&gt;iretq&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;rust_main&lt;/code&gt; continues and accesses the memory address in &lt;code&gt;rax&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;The CPU tries to access address &lt;code&gt;0x0&lt;/code&gt;, which causes a page fault.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;So our exception handler erroneously assumes that the scratch registers were saved by the caller. But the caller (&lt;code&gt;rust_main&lt;/code&gt;) couldn&amp;rsquo;t save any registers since it didn&amp;rsquo;t know that an exception occurs. So nobody saves &lt;code&gt;rax&lt;/code&gt; and the other scratch registers, which leads to the page fault.&lt;/p&gt;
+
+&lt;p&gt;The problem is that we use a calling convention with caller-saved registers for our exception handlers. Instead, we need a calling convention means that preserves &lt;em&gt;all registers&lt;/em&gt;. In other words, all registers must be callee-saved:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;all-registers-callee-saved&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;exception_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{...}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Unfortunately, Rust does not support such a calling convention. It was &lt;a href=&#34;https://github.com/rust-lang/rfcs/pull/1275&#34;&gt;proposed once&lt;/a&gt;, but did not get accepted for various reasons. The primary reason was that such calling conventions can be simulated by writing a naked wrapper function.&lt;/p&gt;
+
+&lt;p&gt;(Remember: &lt;a href=&#34;https://github.com/rust-lang/rfcs/blob/master/text/1201-naked-fns.md&#34;&gt;Naked functions&lt;/a&gt; are functions without prologue and can contain only inline assembly. They were discussed in the &lt;a href=&#34;http://os.phil-opp.com/better-exception-messages.html#naked-functions&#34;&gt;previous post&lt;/a&gt;.)&lt;/p&gt;
+
+&lt;h3 id=&#34;a-naked-wrapper-function&#34;&gt;A naked wrapper function&lt;/h3&gt;
+
+&lt;p&gt;Such a naked wrapper function might look like this:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;#[naked]&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;calling_convention_wrapper&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            push rax&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            push rcx&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            push rdx&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            push rsi&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            push rdi&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            push r8&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            push r9&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            push r10&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            push r11&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            // TODO: call exception handler with C calling convention&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            pop r11&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            pop r10&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            pop r9&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            pop r8&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            pop rdi&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            pop rsi&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            pop rdx&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            pop rcx&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            pop rax&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;        &amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;This wrapper function saves all &lt;em&gt;scratch&lt;/em&gt; registers to the stack before calling the exception handler and restores them afterwards. Note that we &lt;code&gt;pop&lt;/code&gt; the registers in reverse order.&lt;/p&gt;
+
+&lt;p&gt;We don&amp;rsquo;t need to backup &lt;em&gt;preserved&lt;/em&gt; registers since they are callee-saved in the C calling convention. Thus, the compiler already takes care of preserving their values.&lt;/p&gt;
+
+&lt;h3 id=&#34;fixing-our-handler-macro&#34;&gt;Fixing our Handler Macro&lt;/h3&gt;
+
+&lt;p&gt;Let&amp;rsquo;s update our handler macro to fix the calling convention problem. Therefore we need to backup and restore all scratch registers. For that we create two new macros:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/interrupts/mod.rs&lt;/span&gt;
+
+&lt;span class=&#34;n&#34;&gt;macro_rules&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;save_scratch_registers&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;push rax&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              push rcx&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              push rdx&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              push rsi&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              push rdi&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              push r8&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              push r9&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              push r10&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              push r11&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;        &amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;n&#34;&gt;macro_rules&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;restore_scratch_registers&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;pop r11&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              pop r10&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              pop r9&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              pop r8&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              pop rdi&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              pop rsi&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              pop rdx&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              pop rcx&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              pop rax&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            &amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;We need to declare these macros &lt;em&gt;above&lt;/em&gt; our &lt;code&gt;handler&lt;/code&gt; macro, since macros are only available after their declaration.&lt;/p&gt;
+
+&lt;p&gt;Now we can use these macros to fix our &lt;code&gt;handler!&lt;/code&gt; macro:&lt;/p&gt;
+
+&lt;p&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/interrupts/mod.rs&lt;/span&gt;
+
+&lt;span class=&#34;n&#34;&gt;macro_rules&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;handler&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;$name&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ident&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;#[naked]&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;wrapper&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;save_scratch_registers&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;mov rdi, rsp&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;s&#34;&gt;                      add rdi, 9*8 // calculate exception stack frame pointer&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;s&#34;&gt;                      // sub rsp, 8 (stack is aligned already)&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;                      call $0&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                      &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;i&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;$name&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;as&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                             &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;kr&#34;&gt;const&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ExceptionStackFrame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;))&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                      &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;rdi&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;restore_scratch_registers&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;s&#34;&gt;                      // add rsp, 8 (undo stack alignment; not needed anymore)&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;                      iretq&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                      &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;core&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;intrinsics&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;unreachable&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;wrapper&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;!--end*--&gt;&lt;/p&gt;
+
+&lt;p&gt;It&amp;rsquo;s important that we save the registers first, before we modify any of them. After the &lt;code&gt;call&lt;/code&gt; instruction (but before &lt;code&gt;iretq&lt;/code&gt;) we restore the registers again. Because we&amp;rsquo;re now changing &lt;code&gt;rsp&lt;/code&gt; (by pushing the register values) before we load it into &lt;code&gt;rdi&lt;/code&gt;, we would get a wrong exception stack frame pointer. Therefore we need to adjust it by adding the number of bytes we push. We push 9 registers that are 8 bytes each, so &lt;code&gt;9 * 8&lt;/code&gt; bytes in total.&lt;/p&gt;
+
+&lt;p&gt;Note that we no longer need to manually align the stack pointer, because we&amp;rsquo;re pushing an uneven number of registers in &lt;code&gt;save_scratch_registers&lt;/code&gt;. Thus the stack pointer already has the required 16-byte alignment.&lt;/p&gt;
+
+&lt;h3 id=&#34;testing-it-again&#34;&gt;Testing it again&lt;/h3&gt;
+
+&lt;p&gt;Let&amp;rsquo;s test it again with our corrected &lt;code&gt;handler!&lt;/code&gt; macro:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&#34;images/qemu-breakpoint-return.png&#34; alt=&#34;QEMU output with `EXCEPTION BREAKPOINT` and `It did not crash`&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;The page fault is gone and we see the &lt;em&gt;“It did not crash”&lt;/em&gt; message again!&lt;/p&gt;
+
+&lt;p&gt;So the page fault occurred because our exception handler didn&amp;rsquo;t preserve the scratch register &lt;code&gt;rax&lt;/code&gt;. Our new &lt;code&gt;handler!&lt;/code&gt; macro fixes this problem by saving all scratch registers (including &lt;code&gt;rax&lt;/code&gt;) before calling exception handlers. Thus, &lt;code&gt;rax&lt;/code&gt; still contains the valid memory address when &lt;code&gt;rust-main&lt;/code&gt; continues execution.&lt;/p&gt;
+
+&lt;h2 id=&#34;multimedia-registers&#34;&gt;Multimedia Registers&lt;/h2&gt;
+
+&lt;p&gt;When we discussed calling conventions above, we assummed that a x86_64 CPU only has the following 16 registers: &lt;code&gt;rax&lt;/code&gt;, &lt;code&gt;rbx&lt;/code&gt;, &lt;code&gt;rcx&lt;/code&gt;, &lt;code&gt;rdx&lt;/code&gt;, &lt;code&gt;rsi&lt;/code&gt;, &lt;code&gt;rdi&lt;/code&gt;, &lt;code&gt;rsp&lt;/code&gt;, &lt;code&gt;rbp&lt;/code&gt;, &lt;code&gt;r8&lt;/code&gt;, &lt;code&gt;r9&lt;/code&gt;, &lt;code&gt;r10&lt;/code&gt;, &lt;code&gt;r11&lt;/code&gt;.&lt;code&gt;r12&lt;/code&gt;, &lt;code&gt;r13&lt;/code&gt;, &lt;code&gt;r14&lt;/code&gt;, and &lt;code&gt;r15&lt;/code&gt;. These registers are called &lt;em&gt;general purpose registers&lt;/em&gt; since each of them can be used for arithmetic and load/store instructions.&lt;/p&gt;
+
+&lt;p&gt;However, modern CPUs also have a set of &lt;em&gt;special purpose registers&lt;/em&gt;, which can be used to improve performance in several use cases. On x86_64, the most important set of special purpose registers are the &lt;em&gt;multimedia registers&lt;/em&gt;. These registers are larger than the general purpose registers and can be used to speed up audio/video processing or matrix calculations. For example, we could use them to add two 4-dimensional vectors &lt;em&gt;in a single CPU instruction&lt;/em&gt;:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&#34;http://mathurl.com/jz3nvev.png&#34; alt=&#34;`(1,2,3,4) + (5,6,7,8) = (6,8,10,12)`&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;Such multimedia instructions are called &lt;a href=&#34;https://en.wikipedia.org/wiki/SIMD&#34;&gt;Single Instruction Multiple Data (SIMD)&lt;/a&gt; instructions, because they simultaneously perform an operation (e.g. addition) on multiple data words. Good compilers are able to transform normal loops into such SIMD code automatically. This process is called &lt;a href=&#34;https://en.wikipedia.org/wiki/Automatic_vectorization&#34;&gt;auto-vectorization&lt;/a&gt; and can lead to huge performance improvements.&lt;/p&gt;
+
+&lt;p&gt;However, auto-vectorization causes a problem for us: Most of the multimedia registers are caller-saved. According to our discussion of calling conventions above, this means that our exception handlers erroneously assume that they are allowed to overwrite them without preserving their values.&lt;/p&gt;
+
+&lt;p&gt;We don&amp;rsquo;t use any multimedia registers explicitly, but the Rust compiler might auto-vectorize our code (including the exception handlers). Thus we could silently clobber the multimedia registers, which leads to the same problems as above:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&#34;images/xmm-overwrite.svg&#34; alt=&#34;example: program uses mm0, mm1, and mm2. Then the exception handler clobbers mm1.&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;This example shows a program that is using the first three multimedia registers (&lt;code&gt;mm0&lt;/code&gt; to &lt;code&gt;mm2&lt;/code&gt;). At some point, an exception occurs and control is transfered to the exception handler. The exception handler uses &lt;code&gt;mm1&lt;/code&gt; for its own data and thus overwrites the previous value. When the exception is resolved, the CPU continues the interrupted program again. However, the program is now corrupt since it relies on the original &lt;code&gt;mm1&lt;/code&gt; value.&lt;/p&gt;
+
+&lt;h3 id=&#34;saving-and-restoring-multimedia-registers&#34;&gt;Saving and Restoring Multimedia Registers&lt;/h3&gt;
+
+&lt;p&gt;In order to fix this problem, we need to backup all caller-saved multimedia registers before we call the exception handler. The problem is that the set of multimedia registers varies between CPUs. There are different standards:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;https://en.wikipedia.org/wiki/MMX_(instruction_set)&#34;&gt;MMX&lt;/a&gt;: The MMX instruction set was introduced in 1997 and defines eight 64 bit registers called &lt;code&gt;mm0&lt;/code&gt; through &lt;code&gt;mm7&lt;/code&gt;. These registers are just aliases for the registers of the &lt;a href=&#34;https://en.wikipedia.org/wiki/X87&#34;&gt;x87 floating point unit&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://en.wikipedia.org/wiki/Streaming_SIMD_Extensions&#34;&gt;SSE&lt;/a&gt;: The &lt;em&gt;Streaming SIMD Extensions&lt;/em&gt; instruction set was introduced in 1999. Instead of re-using the floating point registers, it adds a completely new register set. The sixteen new registers are called &lt;code&gt;xmm0&lt;/code&gt; through &lt;code&gt;xmm15&lt;/code&gt; and are 128 bits each.&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://en.wikipedia.org/wiki/Advanced_Vector_Extensions&#34;&gt;AVX&lt;/a&gt;: The &lt;em&gt;Advanced Vector Extensions&lt;/em&gt; are extensions that further increase the size of the multimedia registers. The new registers are called &lt;code&gt;ymm0&lt;/code&gt; through &lt;code&gt;ymm15&lt;/code&gt; and are 256 bits each. They extend the &lt;code&gt;xmm&lt;/code&gt; registers, so e.g. &lt;code&gt;xmm0&lt;/code&gt; is the lower (or upper?) half of &lt;code&gt;ymm0&lt;/code&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;The Rust compiler (and LLVM) assume that the &lt;code&gt;x86_64-unknown-linux-gnu&lt;/code&gt; target supports only MMX and SSE, so we don&amp;rsquo;t need to save the &lt;code&gt;ymm0&lt;/code&gt; through &lt;code&gt;ymm15&lt;/code&gt;. But we need to save &lt;code&gt;xmm0&lt;/code&gt; through &lt;code&gt;xmm15&lt;/code&gt; and also &lt;code&gt;mm0&lt;/code&gt; through &lt;code&gt;mm7&lt;/code&gt;. There is a special instruction to do this: &lt;a href=&#34;http://x86.renejeschke.de/html/file_module_x86_id_128.html&#34;&gt;fxsave&lt;/a&gt;. This instruction saves the floating point and multimedia state to a given address. It needs &lt;em&gt;512 bytes&lt;/em&gt; to store that state.&lt;/p&gt;
+
+&lt;p&gt;In order to save/restore the multimedia registers, we &lt;em&gt;could&lt;/em&gt; add new macros:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;macro_rules&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;save_multimedia_registers&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;sub rsp, 512&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              fxsave [rsp]&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;        &amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;n&#34;&gt;macro_rules&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;restore_multimedia_registers&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;fxrstor [rsp]&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;              add rsp, 512&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;            &amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;First, we reserve the 512 bytes on the stack and then we use &lt;code&gt;fxsave&lt;/code&gt; to backup the multimedia registers. In order to restore them later, we use the &lt;a href=&#34;http://x86.renejeschke.de/html/file_module_x86_id_127.html&#34;&gt;fxrstor&lt;/a&gt; instruction. Note that &lt;code&gt;fxsave&lt;/code&gt; and &lt;code&gt;fxrstor&lt;/code&gt; require a 16 byte aligned memory address.&lt;/p&gt;
+
+&lt;p&gt;However, &lt;em&gt;we won&amp;rsquo;t do it that way&lt;/em&gt;. The problem is the large amount of memory required. We will reuse the same code when we handle hardware interrupts in a future post. So for each mouse click, pressed key, or arrived network package we need to write 512 bytes to memory. This would be a huge performance problem.&lt;/p&gt;
+
+&lt;p&gt;Fortunately, there exists an alternative solution.&lt;/p&gt;
+
+&lt;h3 id=&#34;disabling-multimedia-extensions&#34;&gt;Disabling Multimedia Extensions&lt;/h3&gt;
+
+&lt;p&gt;We just disable MMX, SSE, and all the other fancy multimedia extensions. This way, our exception handlers won&amp;rsquo;t clobber the multimedia registers because they won&amp;rsquo;t use them at all.&lt;/p&gt;
+
+&lt;p&gt;This solution has its own disadvantages, of course. For example, it leads to slower kernel code because the compiler can&amp;rsquo;t perform any auto-vectorization optimizations. But it&amp;rsquo;s still the faster solution (since we save many memory accesses) and most kernels do it this way (including Linux).&lt;/p&gt;
+
+&lt;p&gt;So how do we disable MMX and SSE? Well, we just tell the compiler that our target system doesn&amp;rsquo;t support it. Since the very beginning, we&amp;rsquo;re compiling our kernel for the &lt;code&gt;x86_64-unknown-linux-gnu&lt;/code&gt; target. This worked fine so far, but now we want a different target without support for multimedia extensions. We can do so by creating a &lt;em&gt;target configuration file&lt;/em&gt;.&lt;/p&gt;
+
+&lt;h3 id=&#34;target-specifications&#34;&gt;Target Specifications&lt;/h3&gt;
+
+&lt;p&gt;In order to disable the multimedia extensions for our kernel, we need to compile for a custom target. We want a target that is equal to &lt;code&gt;x86_64-unknown-linux-gnu&lt;/code&gt;, but without MMX and SSE support. Rust allows us to specify such a target using a JSON configuration file.&lt;/p&gt;
+
+&lt;p&gt;A minimal target specification that describes the &lt;code&gt;x86_64-unknown-linux-gnu&lt;/code&gt; target looks like this:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-json&#34; data-lang=&#34;json&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;llvm-target&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;x86_64-unknown-linux-gnu&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;data-layout&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;e-m:e-i64:64-f80:128-n8:16:32:64-S128&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;target-endian&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;little&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;target-pointer-width&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;64&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;arch&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;x86_64&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;os&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;none&amp;quot;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;The &lt;code&gt;llvm-target&lt;/code&gt; field specifies the target triple that is passed to LLVM. We want to derive a 64-bit Linux target, so we choose &lt;code&gt;x86_64-unknown-linux-gnu&lt;/code&gt;. The &lt;code&gt;data-layout&lt;/code&gt; field is also passed to LLVM and specifies how data should be laid out in memory. It consists of various specifications seperated by a &lt;code&gt;-&lt;/code&gt; character. For example, the &lt;code&gt;e&lt;/code&gt; means little endian and &lt;code&gt;S128&lt;/code&gt; specifies that the stack should be 128 bits (= 16 byte) aligned. The format is described in detail in the &lt;a href=&#34;http://llvm.org/docs/LangRef.html#data-layout&#34;&gt;LLVM documentation&lt;/a&gt; but there shouldn&amp;rsquo;t be a reason to change this string.&lt;/p&gt;
+
+&lt;p&gt;The other fields are used for conditional compilation. This allows crate authors to use &lt;code&gt;cfg&lt;/code&gt; variables to write special code for depending on the OS or the architecture. There isn&amp;rsquo;t any up-to-date documentation about these fields but the &lt;a href=&#34;https://github.com/rust-lang/rust/blob/c772948b687488a087356cb91432425662e034b9/src/librustc_back/target/mod.rs#L194-L214&#34;&gt;corresponding source code&lt;/a&gt; is quite readable.&lt;/p&gt;
+
+&lt;h4 id=&#34;disabling-mmx-and-sse&#34;&gt;Disabling MMX and SSE&lt;/h4&gt;
+
+&lt;p&gt;In order to disable the multimedia extensions, we create a new target named &lt;code&gt;x86_64-blog_os&lt;/code&gt;. To describe this target, we create a file named &lt;code&gt;x86_64-blog_os.json&lt;/code&gt; in the project root with the following content:&lt;/p&gt;
+
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-json&#34; data-lang=&#34;json&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;llvm-target&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;x86_64-unknown-linux-gnu&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;data-layout&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;e-m:e-i64:64-f80:128-n8:16:32:64-S128&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;target-endian&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;little&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;target-pointer-width&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;64&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;arch&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;x86_64&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;os&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;none&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;  &lt;span class=&#34;nt&#34;&gt;&amp;quot;features&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;-mmx,-sse&amp;quot;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;It&amp;rsquo;s equal to &lt;code&gt;x86_64-unknown-linux-gnu&lt;/code&gt; target but has one additional option: &lt;code&gt;&amp;quot;features&amp;quot;: &amp;quot;-mmx,-sse&amp;quot;&lt;/code&gt;. So we added two target &lt;em&gt;features&lt;/em&gt;: &lt;code&gt;-mmx&lt;/code&gt; and &lt;code&gt;-sse&lt;/code&gt;. The minus prefix defines that our target does &lt;em&gt;not&lt;/em&gt; support this feature. So by specifying &lt;code&gt;-mmx&lt;/code&gt; and &lt;code&gt;-sse&lt;/code&gt;, we disable the default &lt;code&gt;mmx&lt;/code&gt; and &lt;code&gt;sse&lt;/code&gt; features.&lt;/p&gt;
+
+&lt;p&gt;In order to compile for the new target, we need to adjust our Makefile:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-diff&#34; data-lang=&#34;diff&#34;&gt;&lt;span&gt;&lt;/span&gt;# in `Makefile`
+
+ arch ?= x86_64
+&lt;span class=&#34;gd&#34;&gt;-target ?= $(arch)-unknown-linux-gnu&lt;/span&gt;
+&lt;span class=&#34;gi&#34;&gt;+target ?= $(arch)-blog_os&lt;/span&gt;
+...
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;The new target name (&lt;code&gt;x86_64-blog_os&lt;/code&gt;) is the file name of the JSON configuration file without the &lt;code&gt;.json&lt;/code&gt; extension.&lt;/p&gt;
+
+&lt;h3 id=&#34;cross-compilation&#34;&gt;Cross compilation&lt;/h3&gt;
+
+&lt;p&gt;Let&amp;rsquo;s try if our kernel still works with the new target:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;&amp;gt; make run
+Compiling raw-cpuid v2.0.1
+Compiling rlibc v0.1.5
+Compiling x86 v0.7.1
+Compiling spin v0.3.5
+error[E0463]: can&#39;t find crate for `core`
+
+error: aborting due to previous error
+
+Build failed, waiting for other jobs to finish...
+...
+Makefile:52: recipe for target &#39;cargo&#39; failed
+make: *** [cargo] Error 101
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;It doesn&amp;rsquo;t compile anymore. The error tells us that the Rust compiler no longer finds the core library.&lt;/p&gt;
+
+&lt;p&gt;The &lt;a href=&#34;https://doc.rust-lang.org/nightly/core/index.html&#34;&gt;core library&lt;/a&gt; is implicitly linked to all &lt;code&gt;no_std&lt;/code&gt; crates and contains things such as &lt;code&gt;Result&lt;/code&gt;, &lt;code&gt;Option&lt;/code&gt;, and iterators. We&amp;rsquo;ve used that library without problems since &lt;a href=&#34;http://os.phil-opp.com/set-up-rust.html&#34;&gt;the very beginning&lt;/a&gt;, so why is it no longer available?&lt;/p&gt;
+
+&lt;p&gt;The problem is that the core library is distributed together with the Rust compiler as a &lt;em&gt;precompiled&lt;/em&gt; library. So it is only valid for the host triple, which is &lt;code&gt;x86_64-unknown-linux-gnu&lt;/code&gt; in our case. If we want to compile code for other targets, we need to recompile &lt;code&gt;core&lt;/code&gt; for these targets first.&lt;/p&gt;
+
+&lt;h4 id=&#34;xargo&#34;&gt;Xargo&lt;/h4&gt;
+
+&lt;p&gt;That&amp;rsquo;s where &lt;a href=&#34;https://github.com/japaric/xargo&#34;&gt;xargo&lt;/a&gt; comes in. It is a wrapper for cargo that eases cross compilation. We can install it by executing:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;cargo install xargo
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;If the installation fails, make sure that you have &lt;code&gt;cmake&lt;/code&gt; and the OpenSSL headers installed. For more details, see the xargo&amp;rsquo;s &lt;a href=&#34;https://github.com/japaric/xargo#dependencies&#34;&gt;dependency section&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Xargo is “a drop-in replacement for cargo”, so every cargo command also works with &lt;code&gt;xargo&lt;/code&gt;. You can do e.g. &lt;code&gt;xargo --help&lt;/code&gt;, &lt;code&gt;xargo clean&lt;/code&gt;, or &lt;code&gt;xargo doc&lt;/code&gt;. However, the &lt;code&gt;build&lt;/code&gt; command gains additional functionality: &lt;code&gt;xargo build&lt;/code&gt; will automatically cross compile the &lt;code&gt;core&lt;/code&gt; library (and a few other libraries such as &lt;code&gt;alloc&lt;/code&gt; and &lt;code&gt;collections&lt;/code&gt;) when compiling for custom targets.&lt;/p&gt;
+
+&lt;p&gt;That&amp;rsquo;s exactly what we want, so we change one letter in our Makefile:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-diff&#34; data-lang=&#34;diff&#34;&gt;&lt;span&gt;&lt;/span&gt;# in `Makefile`
+...
+
+cargo:
+&lt;span class=&#34;gd&#34;&gt;-	@cargo build --target $(target)&lt;/span&gt;
+&lt;span class=&#34;gi&#34;&gt;+	@xargo build --target $(target)&lt;/span&gt;
+...
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Now the build goes through &lt;code&gt;xargo&lt;/code&gt;, which should fix the compilation error. Let&amp;rsquo;s try it out:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;&amp;gt; make run
+Downloading https://static.rust-lang.org/dist/2016-09-19/rustc-nightly-src.tar.gz
+Unpacking rustc-nightly-src.tar.gz
+Compiling sysroot for x86_64-blog_os
+Compiling core v0.0.0
+
+LLVM ERROR: SSE register return with SSE disabled
+error: Could not compile `core`.
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;Well, we get a different error now, so it seems like we&amp;rsquo;re making progress :).&lt;/p&gt;
+
+&lt;p&gt;We see that &lt;code&gt;xargo&lt;/code&gt; downloads the corresponding source code for our Rust nightly from the Rust servers and then compiles a new &lt;em&gt;sysroot&lt;/em&gt; for our new target. A sysroot contains the various pre-compiled crates such as &lt;code&gt;core&lt;/code&gt;, &lt;code&gt;alloc&lt;/code&gt;, and &lt;code&gt;collections&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;However, a strange error occurs when compiling &lt;code&gt;core&lt;/code&gt;:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;LLVM ERROR: SSE register return with SSE disabled
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;It seems like there is a “SSE register return” although SSE is disabled. But what&amp;rsquo;s an “SSE register return”?&lt;/p&gt;
+
+&lt;h3 id=&#34;sse-register-return&#34;&gt;SSE Register Return&lt;/h3&gt;
+
+&lt;p&gt;Remember when we discussed calling conventions above? The calling convention defines which registers are used for return values. Well, the &lt;a href=&#34;http://refspecs.linuxbase.org/elf/x86-64-abi-0.99.pdf&#34;&gt;System V ABI&lt;/a&gt; defines that &lt;code&gt;xmm0&lt;/code&gt; should be used for returning floating point values. So somewhere in the &lt;code&gt;core&lt;/code&gt; library a function returns a float and LLVM doesn&amp;rsquo;t know what to do. The ABI says “use &lt;code&gt;xmm0&lt;/code&gt;” but the target specification says “don&amp;rsquo;t use &lt;code&gt;xmm&lt;/code&gt; registers”.&lt;/p&gt;
+
+&lt;p&gt;In order to fix this problem, we need to change our float ABI. The idea is to avoid normal hardware-supported floats and use a pure software implementation instead. We can do so by enabling the &lt;code&gt;soft-float&lt;/code&gt; feature for our target. For that, we edit &lt;code&gt;x86_64-blog_os.json&lt;/code&gt;:&lt;/p&gt;
+
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-json&#34; data-lang=&#34;json&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;llvm-target&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;x86_64-unknown-linux-gnu&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;err&#34;&gt;...&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;  &lt;span class=&#34;nt&#34;&gt;&amp;quot;features&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;-mmx,-sse,+soft-float&amp;quot;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;The plus prefix tells LLVM to enable the &lt;code&gt;soft-float&lt;/code&gt; feature.&lt;/p&gt;
+
+&lt;p&gt;Let&amp;rsquo;s try &lt;code&gt;make run&lt;/code&gt; again:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;&amp;gt; make run
+Compiling sysroot for x86_64-blog_os
+Compiling core v0.0.0 (file:///home/…/.xargo/src/libcore)
+Compiling rustc_unicode v0.0.0 (file:///home/…/.xargo/src/librustc_unicode)
+Compiling rand v0.0.0 (file:///home/…/.xargo/src/librand)
+Compiling alloc v0.0.0 (file:///home/…/.xargo/src/liballoc)
+Compiling collections v0.0.0 (file:///home/…/.xargo/src/libcollections)
+ Finished release [optimized] target(s) in 40.35 secs
+Compiling once v0.3.2
+Compiling bitflags v0.4.0
+Compiling bit_field v0.1.0
+Compiling x86 v0.7.1
+Compiling linked_list_allocator v0.2.2
+Compiling raw-cpuid v2.0.1
+Compiling spin v0.3.5
+Compiling multiboot2 v0.1.0
+Compiling rlibc v0.1.5
+Compiling spin v0.4.3
+Compiling bitflags v0.7.0
+Compiling lazy_static v0.2.1
+Compiling hole_list_allocator v0.1.0
+Compiling blog_os v0.1.0
+warning: unused result which must be used…
+warning: unused variable: `allocator`…
+warning: unused variable: `frame`…
+
+  Finished debug [unoptimized + debuginfo] target(s) in 6.62 secs
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;It worked! We see that &lt;code&gt;xargo&lt;/code&gt; now successfully compiles the sysroot crates (including &lt;code&gt;core&lt;/code&gt;) in release mode. Then it starts the normal cargo build, which now succeeds since the required &lt;code&gt;core&lt;/code&gt;, &lt;code&gt;alloc&lt;/code&gt;, and &lt;code&gt;collection&lt;/code&gt; libraries are now available.&lt;/p&gt;
+
+&lt;p&gt;Note that cargo needs to recompile all dependencies too, since it needs to generate different code for the new target. If you&amp;rsquo;re getting an error about a missing &lt;code&gt;compiler-rt&lt;/code&gt; library, try updating to the newest nightly (&lt;code&gt;compiler-rt&lt;/code&gt; was removed in &lt;a href=&#34;https://github.com/rust-lang/rust/pull/35021&#34;&gt;PR #35021&lt;/a&gt;).&lt;/p&gt;
+
+&lt;p&gt;Now we have a kernel that never touches the multimedia registers! We can verify this by executing:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;&amp;gt; objdump -d build/kernel-x86_64.bin | grep &amp;quot;mm[0-9]&amp;quot;
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;If the command produces no output, our kernel uses neither MMX (&lt;code&gt;mm0&lt;/code&gt; – &lt;code&gt;mm7&lt;/code&gt;) nor SSE (&lt;code&gt;xmm0&lt;/code&gt; – &lt;code&gt;xmm15&lt;/code&gt;) registers.&lt;/p&gt;
+
+&lt;p&gt;So now our return-from-exception logic works without problems in &lt;em&gt;most&lt;/em&gt; cases. However, there is still a pitfall hidden in the C calling convention, which might cause hideous bugs in some rare cases.&lt;/p&gt;
+
+&lt;h2 id=&#34;the-red-zone&#34;&gt;The Red Zone&lt;/h2&gt;
+
+&lt;p&gt;The &lt;a href=&#34;http://eli.thegreenplace.net/2011/09/06/stack-frame-layout-on-x86-64#the-red-zone&#34;&gt;red zone&lt;/a&gt; is an optimization of the &lt;a href=&#34;http://refspecs.linuxbase.org/elf/x86-64-abi-0.99.pdf&#34;&gt;System V ABI&lt;/a&gt; that allows functions to temporary use the 128 bytes below its stack frame without adjusting the stack pointer:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&#34;images/red-zone.svg&#34; alt=&#34;stack frame with red zone&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;The image shows the stack frame of a function with &lt;code&gt;n&lt;/code&gt; local variables. On function entry, the stack pointer is adjusted to make room on the stack for the local variables.&lt;/p&gt;
+
+&lt;p&gt;The red zone is defined as the 128 bytes below the adjusted stack pointer. The function can use this area for temporary data that&amp;rsquo;s not needed across function calls. Thus, the two instructions for adjusting the stack pointer can be avoided in some cases (e.g. in small leaf functions).&lt;/p&gt;
+
+&lt;p&gt;However, this optimization leads to huge problems with exceptions. Let&amp;rsquo;s assume that an exception occurs while a function uses the red zone:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&#34;images/red-zone-overwrite.svg&#34; alt=&#34;red zone overwritten by exception handler&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;The CPU and the exception handler overwrite the data in red zone. But this data is still needed by the interrupted function. So the function won&amp;rsquo;t work correctly anymore when we return from the exception handler. It might fail or cause another exception, but it could also lead to strange bugs that &lt;a href=&#34;http://forum.osdev.org/viewtopic.php?t=21720&#34;&gt;take weeks to debug&lt;/a&gt;.&lt;/p&gt;
+
+&lt;h3 id=&#34;adjusting-our-exception-handler&#34;&gt;Adjusting our Exception Handler?&lt;/h3&gt;
+
+&lt;p&gt;The problem is that the &lt;a href=&#34;http://refspecs.linuxbase.org/elf/x86-64-abi-0.99.pdf&#34;&gt;System V ABI&lt;/a&gt; demands that the red zone &lt;em&gt;“shall not be modified by signal or interrupt handlers.”&lt;/em&gt; Our current exception handlers do not respect this. We could try to fix it by subtracting 128 from the stack pointer before pushing anything:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-nasm&#34; data-lang=&#34;nasm&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;nf&#34;&gt;sub&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;rsp&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;mi&#34;&gt;128&lt;/span&gt;
+&lt;span class=&#34;nf&#34;&gt;save_scratch_registers&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;
+&lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
+&lt;span class=&#34;nf&#34;&gt;call&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;...&lt;/span&gt;
+&lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
+&lt;span class=&#34;kd&#34;&gt;rest&lt;/span&gt;&lt;span class=&#34;nv&#34;&gt;ore_scratch_registers&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;
+&lt;span class=&#34;nf&#34;&gt;add&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;rsp&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;mi&#34;&gt;128&lt;/span&gt;
+
+&lt;span class=&#34;nf&#34;&gt;iretq&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;&lt;em&gt;This will not work.&lt;/em&gt; The problem is that the CPU pushes the exception stack frame before even calling our handler function. So the CPU itself will clobber the red zone and there is nothing we can do about that. So our only chance is to disable the red zone.&lt;/p&gt;
+
+&lt;h3 id=&#34;disabling-the-red-zone&#34;&gt;Disabling the Red Zone&lt;/h3&gt;
+
+&lt;p&gt;The red zone is a property of our target, so in order to disable it we edit our &lt;code&gt;x86_64-blog_os.json&lt;/code&gt; a last time:&lt;/p&gt;
+
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-json&#34; data-lang=&#34;json&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;llvm-target&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;x86_64-unknown-linux-gnu&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+  &lt;span class=&#34;err&#34;&gt;...&lt;/span&gt;
+  &lt;span class=&#34;nt&#34;&gt;&amp;quot;features&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;s2&#34;&gt;&amp;quot;-mmx,-sse,+soft-float&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;  &lt;span class=&#34;nt&#34;&gt;&amp;quot;disable-redzone&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt; &lt;span class=&#34;kc&#34;&gt;true&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+
+&lt;p&gt;We add one additional option at the end: &lt;code&gt;&amp;quot;disable-redzone&amp;quot;: true&lt;/code&gt;. As you might guess, this option disables the red zone optimization.&lt;/p&gt;
+
+&lt;p&gt;Now we have a red zone free kernel!&lt;/p&gt;
+
+&lt;h2 id=&#34;exceptions-with-error-codes&#34;&gt;Exceptions with Error Codes&lt;/h2&gt;
+
+&lt;p&gt;We&amp;rsquo;re now able to correctly return from exceptions without error codes. However, we still can&amp;rsquo;t return from exceptions that push an error code (e.g. page faults). Let&amp;rsquo;s fix that by updating our &lt;code&gt;handler_with_error_code&lt;/code&gt; macro:&lt;/p&gt;
+
+&lt;p&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/interrupts/mod.rs&lt;/span&gt;
+
+&lt;span class=&#34;n&#34;&gt;macro_rules&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;handler_with_error_code&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;$name&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ident&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;#[naked]&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;wrapper&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;pop rsi // pop error code into rsi&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      mov rdi, rsp&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      sub rsp, 8 // align the stack pointer&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      call $0&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                      &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;i&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;$name&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;as&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                          &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;kr&#34;&gt;const&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ExceptionStackFrame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;kt&#34;&gt;u64&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;))&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;                      &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;rdi&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;rsi&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;iretq&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;core&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;intrinsics&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;unreachable&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;wrapper&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;!--end*--&gt;&lt;/p&gt;
+
+&lt;p&gt;First, we change the type of the handler function: no more &lt;code&gt;-&amp;gt; !&lt;/code&gt;, so it no longer needs to diverge. We also add an &lt;code&gt;iretq&lt;/code&gt; instruction at the end.&lt;/p&gt;
+
+&lt;p&gt;Now we can make our &lt;code&gt;page_fault_handler&lt;/code&gt; non-diverging:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-diff&#34; data-lang=&#34;diff&#34;&gt;&lt;span&gt;&lt;/span&gt;// in src/interrupts/mod.rs
+
+ extern &amp;quot;C&amp;quot; fn page_fault_handler(stack_frame: *const ExceptionStackFrame,
+&lt;span class=&#34;gd&#34;&gt;-   error_code: u64) -&amp;gt; ! { ... }&lt;/span&gt;
+&lt;span class=&#34;gi&#34;&gt;+   error_code: u64) { ... }&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;However, now we have the same problem as above: The handler function will overwrite the scratch registers and cause bugs when returning. Let&amp;rsquo;s fix this by invoking &lt;code&gt;save_scratch_registers&lt;/code&gt; at the beginning:&lt;/p&gt;
+
+&lt;p&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/interrupts/mod.rs&lt;/span&gt;
+
+&lt;span class=&#34;n&#34;&gt;macro_rules&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;handler_with_error_code&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;$name&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ident&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;#[naked]&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;wrapper&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;save_scratch_registers&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;pop rsi // pop error code into rsi&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      mov rdi, rsp&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;s&#34;&gt;                      add rdi, 10*8 // calculate exception stack frame pointer&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;                      sub rsp, 8 // align the stack pointer&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      call $0&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;s&#34;&gt;                      add rsp, 8 // undo stack pointer alignment&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;                      &amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;i&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;$name&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;as&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                          &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;kr&#34;&gt;const&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ExceptionStackFrame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;kt&#34;&gt;u64&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;))&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                      &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;rdi&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;rsi&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;restore_scratch_registers&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;iretq&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;core&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;intrinsics&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;unreachable&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;wrapper&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;!--end*--&gt;
+Now we backup the scratch registers to the stack right at the beginning and restore them just before the &lt;code&gt;iretq&lt;/code&gt;. Like in the &lt;code&gt;handler&lt;/code&gt; macro, we now need to add &lt;code&gt;10*8&lt;/code&gt; to &lt;code&gt;rdi&lt;/code&gt; in order to get the correct exception stack frame pointer (&lt;code&gt;save_scratch_registers&lt;/code&gt; pushes nine 8 byte registers, plus the error code). We also need to undo the stack pointer alignment after the &lt;code&gt;call&lt;/code&gt; &lt;sup class=&#34;footnote-ref&#34; id=&#34;fnref:fn-stack-alignment&#34;&gt;&lt;a rel=&#34;footnote&#34; href=&#34;#fn:fn-stack-alignment&#34;&gt;1&lt;/a&gt;&lt;/sup&gt;.&lt;/p&gt;
+
+&lt;p&gt;Now we have one last bug: We &lt;code&gt;pop&lt;/code&gt; the error code into &lt;code&gt;rsi&lt;/code&gt;, but the error code is no longer at the top of the stack (since &lt;code&gt;save_scratch_registers&lt;/code&gt; pushed 9 registers on top of it). So we need to do it differently:&lt;/p&gt;
+
+&lt;p&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/interrupts/mod.rs&lt;/span&gt;
+
+&lt;span class=&#34;n&#34;&gt;macro_rules&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;handler_with_error_code&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;$name&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ident&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;#[naked]&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;wrapper&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;save_scratch_registers&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;mov rsi, [rsp + 9*8] // load error code into rsi&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;                      mov rdi, rsp&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      add rdi, 10*8 // calculate exception stack frame pointer&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      sub rsp, 8 // align the stack pointer&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      call $0&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      add rsp, 8 // undo stack pointer alignment&lt;/span&gt;
+&lt;span class=&#34;s&#34;&gt;                      &amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;i&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;cp&#34;&gt;$name&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;as&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                          &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;kr&#34;&gt;const&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ExceptionStackFrame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;kt&#34;&gt;u64&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;))&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                      &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;rdi&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;rsi&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;restore_scratch_registers&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;asm&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;add rsp, 8 // pop error code&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;                      iretq&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::::&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;intel&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;volatile&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;                &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;core&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;intrinsics&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;unreachable&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;();&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;wrapper&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;!--end*--&gt;&lt;/p&gt;
+
+&lt;p&gt;Instead of using &lt;code&gt;pop&lt;/code&gt;, we&amp;rsquo;re calculating the error code address manually (&lt;code&gt;save_scratch_registers&lt;/code&gt; pushes nine 8 byte registers) and load it into &lt;code&gt;rsi&lt;/code&gt; using a &lt;code&gt;mov&lt;/code&gt;. So now the error code stays on the stack. But &lt;code&gt;iretq&lt;/code&gt; doesn&amp;rsquo;t handle the error code, so we need to pop it before invoking &lt;code&gt;iretq&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;Phew! That was a lot of fiddling with assembly. Let&amp;rsquo;s test if it still works.&lt;/p&gt;
+
+&lt;h3 id=&#34;testing-1&#34;&gt;Testing&lt;/h3&gt;
+
+&lt;p&gt;First, we test if the exception stack frame pointer and the error code are still correct:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in rust_main in src/lib.rs&lt;/span&gt;
+
+&lt;span class=&#34;p&#34;&gt;...&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;int&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;3&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;};&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;c1&#34;&gt;// provoke a page fault&lt;/span&gt;
+&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mh&#34;&gt;0xdeadbeaf&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;as&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;k&#34;&gt;mut&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;kt&#34;&gt;u64&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;42&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;n&#34;&gt;println&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;!&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;It did not crash!&amp;quot;&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;k&#34;&gt;loop&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;This should cause the following error message:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;EXCEPTION: PAGE FAULT while accessing 0xdeadbeaf
+error code: CAUSED_BY_WRITE
+ExceptionStackFrame {
+    instruction_pointer: 1114753,
+    code_segment: 8,
+    cpu_flags: 2097158,
+    stack_pointer: 1171104,
+    stack_segment: 16
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;The error code should still be &lt;code&gt;CAUSED_BY_WRITE&lt;/code&gt; and the exception stack frame values should also be correct (e.g. &lt;code&gt;code_segment&lt;/code&gt; should be 8 and &lt;code&gt;stack_segment&lt;/code&gt; should be 16).&lt;/p&gt;
+
+&lt;h3 id=&#34;page-faults-as-breakpoints&#34;&gt;Page Faults as Breakpoints&lt;/h3&gt;
+
+&lt;p&gt;We didn&amp;rsquo;t test returns from the page fault handler yet. In order to test our &lt;code&gt;iretq&lt;/code&gt; logic, we &lt;em&gt;temporary&lt;/em&gt; define accesses to &lt;code&gt;0xdeadbeaf&lt;/code&gt; as legal. They should behave exactly like the breakpoint exception: Print an error message and then continue with the next instruction.&lt;/p&gt;
+
+&lt;p&gt;Therefore we update our &lt;code&gt;page_fault_handler&lt;/code&gt;:&lt;/p&gt;
+
+&lt;p&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/interrupts/mod.rs&lt;/span&gt;
+
+&lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;s&#34;&gt;&amp;quot;C&amp;quot;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;page_fault_handler&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;stack_frame&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;kr&#34;&gt;const&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ExceptionStackFrame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;error_code&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;kt&#34;&gt;u64&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;kn&#34;&gt;use&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;x86&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;controlregs&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;  &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;print_error&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(...);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// new&lt;/span&gt;
+&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;unsafe&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;if&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;controlregs&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;::&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;cr2&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;==&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;mh&#34;&gt;0xdeadbeaf&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;kd&#34;&gt;let&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;stack_frame&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;amp;&lt;/span&gt;&lt;span class=&#34;k&#34;&gt;mut&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;stack_frame&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;as&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;*&lt;/span&gt;&lt;span class=&#34;k&#34;&gt;mut&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;ExceptionStackFrame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;);&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;stack_frame&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;.&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;instruction_pointer&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;+=&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;7&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;            &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;return&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;        &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;&lt;span class=&#34;hll&#34;&gt;&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/span&gt;
+&lt;span class=&#34;w&#34;&gt;    &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;loop&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;!--end*--&gt;&lt;/p&gt;
+
+&lt;p&gt;If the accessed memory address is &lt;code&gt;0xdeadbeaf&lt;/code&gt; (the CPU stores this information in the &lt;code&gt;cr2&lt;/code&gt; register), we don&amp;rsquo;t &lt;code&gt;loop&lt;/code&gt; endlessly. Instead we update the stored instruction pointer and return. Remember, the normal behavior when returning from a page fault is to restart the failing instruction. We don&amp;rsquo;t want that, so we manipulate the stored instruction pointer to point to the next instruction.&lt;/p&gt;
+
+&lt;p&gt;In our case, the page fault is caused by the instruction at address &lt;code&gt;1114753&lt;/code&gt;, which is &lt;code&gt;0x110281&lt;/code&gt; in hexadecimal. Let&amp;rsquo;s examine this instruction using &lt;code&gt;objdump&lt;/code&gt;:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;&amp;gt; objdump -d build/kernel-x86_64.bin | grep &amp;quot;110281&amp;quot;
+110281:	48 c7 02 2a 00 00 00 	movq   $0x2a,(%rdx)
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;It&amp;rsquo;s a &lt;code&gt;movq&lt;/code&gt; instruction with the 7 byte opcode &lt;code&gt;48 c7 02 2a 00 00 00&lt;/code&gt;. So the next instruction starts 7 bytes after.&lt;/p&gt;
+
+&lt;p&gt;Thus, we can jump to the next instruction in our &lt;code&gt;page_fault_handler&lt;/code&gt; by adding &lt;code&gt;7&lt;/code&gt; to the instruction pointer. &lt;em&gt;This is a horrible hack&lt;/em&gt;, since the page fault could also be caused by other instructions with different opcode lengths. But it&amp;rsquo;s good enough for a quick test.&lt;/p&gt;
+
+&lt;p&gt;When we execute &lt;code&gt;make run&lt;/code&gt; now, we should see the &lt;em&gt;“It did not crash”&lt;/em&gt; message after the page fault:&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&#34;images/qemu-page-fault-as-breakpoint.png&#34; alt=&#34;QEMU showing the the page fault error and the “It did not crash” message&#34; /&gt;&lt;/p&gt;
+
+&lt;p&gt;Our &lt;code&gt;iretq&lt;/code&gt; logic seems to work!&lt;/p&gt;
+
+&lt;p&gt;Let&amp;rsquo;s quickly remove the &lt;code&gt;0xdeadbeaf&lt;/code&gt; hack from our &lt;code&gt;page_fault_handler&lt;/code&gt; again and pretend that we&amp;rsquo;ve never done that :).&lt;/p&gt;
+
+&lt;h2 id=&#34;what-s-next&#34;&gt;What&amp;rsquo;s next?&lt;/h2&gt;
+
+&lt;p&gt;We are now able to catch exceptions and to return from them. However, there are still exceptions that completely crash our kernel by causing a &lt;a href=&#34;https://en.wikipedia.org/wiki/Triple_fault&#34;&gt;triple fault&lt;/a&gt;. In the next post, we will fix this issue by handling a special type of exception: the &lt;a href=&#34;https://en.wikipedia.org/wiki/Double_fault&#34;&gt;double fault&lt;/a&gt;. Thus, we will be able to avoid random reboots in our kernel.&lt;/p&gt;
+&lt;div class=&#34;footnotes&#34;&gt;
+
+&lt;hr /&gt;
+
+&lt;ol&gt;
+&lt;li id=&#34;fn:fn-stack-alignment&#34;&gt;The stack alignment is actually wrong here, since we additionally pushed an uneven number of registers. However, the &lt;code&gt;pop rsi&lt;/code&gt; is wrong too, since the error code is no longer at the top of the stack. When we fix that problem, the stack alignment becomes correct again. So I left it in to keep things simple.
+ &lt;a class=&#34;footnote-return&#34; href=&#34;#fnref:fn-stack-alignment&#34;&gt;&lt;sup&gt;[return]&lt;/sup&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+</description>
+    </item>
     
     <item>
       <title>Better Exception Messages</title>
