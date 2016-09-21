@@ -9,13 +9,13 @@
     <managingEditor>dev@phil-opp.com (Philipp Oppermann)</managingEditor>
     <webMaster>dev@phil-opp.com (Philipp Oppermann)</webMaster>
     <copyright>&amp;copy; 2016. All rights reserved.</copyright>
-    <lastBuildDate>Sat, 06 Aug 2016 00:00:00 +0000</lastBuildDate>
+    <lastBuildDate>Wed, 21 Sep 2016 00:00:00 +0000</lastBuildDate>
     <atom:link href="http://os.phil-opp.com/atom.xml" rel="self" type="application/rss+xml" />
     
     <item>
       <title>Returning from Exceptions</title>
       <link>http://os.phil-opp.com/returning-from-exceptions.html</link>
-      <pubDate>Sat, 06 Aug 2016 00:00:00 +0000</pubDate>
+      <pubDate>Wed, 21 Sep 2016 00:00:00 +0000</pubDate>
       <author>dev@phil-opp.com (Philipp Oppermann)</author>
       <guid>http://os.phil-opp.com/returning-from-exceptions.html</guid>
       <description>
