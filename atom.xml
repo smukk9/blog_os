@@ -6039,11 +6039,13 @@ multiboot_start: 0x11d400, multiboot_end: 0x11d9c8
 
 &lt;h2 id=&#34;building-rust&#34;&gt;Building Rust&lt;/h2&gt;
 
-&lt;p&gt;We can now build it using &lt;code&gt;cargo build&lt;/code&gt;. To make sure, we are building it for the x86_64 architecture, we can pass an explicit target:&lt;/p&gt;
+&lt;p&gt;We can now build it using &lt;code&gt;cargo build&lt;/code&gt;. To make sure that we build it for the x86_64 architecture and that we use a Linux compatible format, we pass an explicit &lt;a href=&#34;https://github.com/japaric/rust-cross#the-target-triple&#34;&gt;target triple&lt;/a&gt;:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-bash&#34; data-lang=&#34;bash&#34;&gt;&lt;span&gt;&lt;/span&gt;cargo build --target&lt;span class=&#34;o&#34;&gt;=&lt;/span&gt;x86_64-unknown-linux-gnu
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;It creates a static library at &lt;code&gt;target/x86_64-unknown-linux-gnu/debug/libblog_os.a&lt;/code&gt;, which can be linked with our assembly kernel. If you&amp;rsquo;re getting an error about a missing &lt;code&gt;core&lt;/code&gt; crate, &lt;a href=&#34;http://os.phil-opp.com/cross-compile-libcore.html&#34;&gt;look here&lt;/a&gt;.&lt;/p&gt;
+&lt;p&gt;This command creates a static library at &lt;code&gt;target/x86_64-unknown-linux-gnu/debug/libblog_os.a&lt;/code&gt;, which can be linked with our assembly kernel.&lt;/p&gt;
+
+&lt;p&gt;(If you&amp;rsquo;re getting an error about a missing &lt;code&gt;core&lt;/code&gt; crate, you&amp;rsquo;re probably using a host system with a different target triple. You can easily resolve this by executing &lt;code&gt;rustup target add x86_64-unknown-linux-gnu&lt;/code&gt;. This command will install the pre-compiled standard libraries for this target, including the missing &lt;code&gt;core&lt;/code&gt; crate.)&lt;/p&gt;
 
 &lt;p&gt;To build and link the rust library on &lt;code&gt;make&lt;/code&gt;, we extend our &lt;code&gt;Makefile&lt;/code&gt;(&lt;a href=&#34;https://github.com/phil-opp/blog_os/blob/set_up_rust/Makefile&#34;&gt;full file&lt;/a&gt;):&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-make&#34; data-lang=&#34;make&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c&#34;&gt;# ...&lt;/span&gt;

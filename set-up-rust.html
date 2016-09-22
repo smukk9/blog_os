@@ -134,11 +134,13 @@
 
 <h2 id="building-rust">Building Rust</h2>
 
-<p>We can now build it using <code>cargo build</code>. To make sure, we are building it for the x86_64 architecture, we can pass an explicit target:</p>
+<p>We can now build it using <code>cargo build</code>. To make sure that we build it for the x86_64 architecture and that we use a Linux compatible format, we pass an explicit <a href="https://github.com/japaric/rust-cross#the-target-triple">target triple</a>:</p>
 <div class="highlight"><pre><code class="language-bash" data-lang="bash"><span></span>cargo build --target<span class="o">=</span>x86_64-unknown-linux-gnu
 </code></pre></div>
 
-<p>It creates a static library at <code>target/x86_64-unknown-linux-gnu/debug/libblog_os.a</code>, which can be linked with our assembly kernel. If you&rsquo;re getting an error about a missing <code>core</code> crate, <a href="/cross-compile-libcore.html">look here</a>.</p>
+<p>This command creates a static library at <code>target/x86_64-unknown-linux-gnu/debug/libblog_os.a</code>, which can be linked with our assembly kernel.</p>
+
+<p>(If you&rsquo;re getting an error about a missing <code>core</code> crate, you&rsquo;re probably using a host system with a different target triple. You can easily resolve this by executing <code>rustup target add x86_64-unknown-linux-gnu</code>. This command will install the pre-compiled standard libraries for this target, including the missing <code>core</code> crate.)</p>
 
 <p>To build and link the rust library on <code>make</code>, we extend our <code>Makefile</code>(<a href="https://github.com/phil-opp/blog_os/blob/set_up_rust/Makefile">full file</a>):</p>
 <div class="highlight"><pre><code class="language-make" data-lang="make"><span></span><span class="c"># ...</span>
