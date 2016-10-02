@@ -492,7 +492,7 @@ Breakpoint 1, blog_os::rust_main (multiboot_information_address=1539136)
 
 &lt;h3 id=&#34;disabling-multimedia-extensions&#34;&gt;Disabling Multimedia Extensions&lt;/h3&gt;
 
-&lt;p&gt;We just disable MMX, SSE, and all the other fancy multimedia extensions. This way, our exception handlers won&amp;rsquo;t clobber the multimedia registers because they won&amp;rsquo;t use them at all.&lt;/p&gt;
+&lt;p&gt;We just disable MMX, SSE, and all the other fancy multimedia extensions in our kernel&lt;sup class=&#34;footnote-ref&#34; id=&#34;fnref:fn-userspace-sse&#34;&gt;&lt;a rel=&#34;footnote&#34; href=&#34;#fn:fn-userspace-sse&#34;&gt;1&lt;/a&gt;&lt;/sup&gt;. This way, our exception handlers won&amp;rsquo;t clobber the multimedia registers because they won&amp;rsquo;t use them at all.&lt;/p&gt;
 
 &lt;p&gt;This solution has its own disadvantages, of course. For example, it leads to slower kernel code because the compiler can&amp;rsquo;t perform any auto-vectorization optimizations. But it&amp;rsquo;s still the faster solution (since we save many memory accesses) and most kernels do it this way (including Linux).&lt;/p&gt;
 
@@ -791,7 +791,7 @@ warning: unused variable: `frame`…
 &lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 &lt;!--end*--&gt;
-Now we backup the scratch registers to the stack right at the beginning and restore them just before the &lt;code&gt;iretq&lt;/code&gt;. Like in the &lt;code&gt;handler&lt;/code&gt; macro, we now need to add &lt;code&gt;10*8&lt;/code&gt; to &lt;code&gt;rdi&lt;/code&gt; in order to get the correct exception stack frame pointer (&lt;code&gt;save_scratch_registers&lt;/code&gt; pushes nine 8 byte registers, plus the error code). We also need to undo the stack pointer alignment after the &lt;code&gt;call&lt;/code&gt; &lt;sup class=&#34;footnote-ref&#34; id=&#34;fnref:fn-stack-alignment&#34;&gt;&lt;a rel=&#34;footnote&#34; href=&#34;#fn:fn-stack-alignment&#34;&gt;1&lt;/a&gt;&lt;/sup&gt;.&lt;/p&gt;
+Now we backup the scratch registers to the stack right at the beginning and restore them just before the &lt;code&gt;iretq&lt;/code&gt;. Like in the &lt;code&gt;handler&lt;/code&gt; macro, we now need to add &lt;code&gt;10*8&lt;/code&gt; to &lt;code&gt;rdi&lt;/code&gt; in order to get the correct exception stack frame pointer (&lt;code&gt;save_scratch_registers&lt;/code&gt; pushes nine 8 byte registers, plus the error code). We also need to undo the stack pointer alignment after the &lt;code&gt;call&lt;/code&gt; &lt;sup class=&#34;footnote-ref&#34; id=&#34;fnref:fn-stack-alignment&#34;&gt;&lt;a rel=&#34;footnote&#34; href=&#34;#fn:fn-stack-alignment&#34;&gt;2&lt;/a&gt;&lt;/sup&gt;.&lt;/p&gt;
 
 &lt;p&gt;Now we have one last bug: We &lt;code&gt;pop&lt;/code&gt; the error code into &lt;code&gt;rsi&lt;/code&gt;, but the error code is no longer at the top of the stack (since &lt;code&gt;save_scratch_registers&lt;/code&gt; pushed 9 registers on top of it). So we need to do it differently:&lt;/p&gt;
 
@@ -914,6 +914,8 @@ ExceptionStackFrame {
 &lt;hr /&gt;
 
 &lt;ol&gt;
+&lt;li id=&#34;fn:fn-userspace-sse&#34;&gt;Userspace programs will still be able to use the multimedia registers.
+ &lt;a class=&#34;footnote-return&#34; href=&#34;#fnref:fn-userspace-sse&#34;&gt;&lt;sup&gt;[return]&lt;/sup&gt;&lt;/a&gt;&lt;/li&gt;
 &lt;li id=&#34;fn:fn-stack-alignment&#34;&gt;The stack alignment is actually wrong here, since we additionally pushed an uneven number of registers. However, the &lt;code&gt;pop rsi&lt;/code&gt; is wrong too, since the error code is no longer at the top of the stack. When we fix that problem, the stack alignment becomes correct again. So I left it in to keep things simple.
  &lt;a class=&#34;footnote-return&#34; href=&#34;#fnref:fn-stack-alignment&#34;&gt;&lt;sup&gt;[return]&lt;/sup&gt;&lt;/a&gt;&lt;/li&gt;
 &lt;/ol&gt;

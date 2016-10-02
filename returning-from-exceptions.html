@@ -549,7 +549,7 @@ Breakpoint 1, blog_os::rust_main (multiboot_information_address=1539136)
 
 <h3 id="disabling-multimedia-extensions">Disabling Multimedia Extensions</h3>
 
-<p>We just disable MMX, SSE, and all the other fancy multimedia extensions. This way, our exception handlers won&rsquo;t clobber the multimedia registers because they won&rsquo;t use them at all.</p>
+<p>We just disable MMX, SSE, and all the other fancy multimedia extensions in our kernel<sup class="footnote-ref" id="fnref:fn-userspace-sse"><a rel="footnote" href="#fn:fn-userspace-sse">1</a></sup>. This way, our exception handlers won&rsquo;t clobber the multimedia registers because they won&rsquo;t use them at all.</p>
 
 <p>This solution has its own disadvantages, of course. For example, it leads to slower kernel code because the compiler can&rsquo;t perform any auto-vectorization optimizations. But it&rsquo;s still the faster solution (since we save many memory accesses) and most kernels do it this way (including Linux).</p>
 
@@ -848,7 +848,7 @@ warning: unused variable: `frame`…
 <span class="p">}</span><span class="w"></span>
 </code></pre></div>
 <!--end*-->
-Now we backup the scratch registers to the stack right at the beginning and restore them just before the <code>iretq</code>. Like in the <code>handler</code> macro, we now need to add <code>10*8</code> to <code>rdi</code> in order to get the correct exception stack frame pointer (<code>save_scratch_registers</code> pushes nine 8 byte registers, plus the error code). We also need to undo the stack pointer alignment after the <code>call</code> <sup class="footnote-ref" id="fnref:fn-stack-alignment"><a rel="footnote" href="#fn:fn-stack-alignment">1</a></sup>.</p>
+Now we backup the scratch registers to the stack right at the beginning and restore them just before the <code>iretq</code>. Like in the <code>handler</code> macro, we now need to add <code>10*8</code> to <code>rdi</code> in order to get the correct exception stack frame pointer (<code>save_scratch_registers</code> pushes nine 8 byte registers, plus the error code). We also need to undo the stack pointer alignment after the <code>call</code> <sup class="footnote-ref" id="fnref:fn-stack-alignment"><a rel="footnote" href="#fn:fn-stack-alignment">2</a></sup>.</p>
 
 <p>Now we have one last bug: We <code>pop</code> the error code into <code>rsi</code>, but the error code is no longer at the top of the stack (since <code>save_scratch_registers</code> pushed 9 registers on top of it). So we need to do it differently:</p>
 
@@ -971,6 +971,8 @@ ExceptionStackFrame {
 <hr />
 
 <ol>
+<li id="fn:fn-userspace-sse">Userspace programs will still be able to use the multimedia registers.
+ <a class="footnote-return" href="#fnref:fn-userspace-sse"><sup>[return]</sup></a></li>
 <li id="fn:fn-stack-alignment">The stack alignment is actually wrong here, since we additionally pushed an uneven number of registers. However, the <code>pop rsi</code> is wrong too, since the error code is no longer at the top of the stack. When we fix that problem, the stack alignment becomes correct again. So I left it in to keep things simple.
  <a class="footnote-return" href="#fnref:fn-stack-alignment"><sup>[return]</sup></a></li>
 </ol>
