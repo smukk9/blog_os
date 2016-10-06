@@ -12,6 +12,7 @@
 #![no_std]
 
 extern crate rlibc;
+extern crate volatile;
 extern crate spin;
 
 #[macro_use]
