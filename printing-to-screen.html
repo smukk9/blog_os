@@ -72,6 +72,8 @@
   <time datetime="2015-10-23" class="post-date">
     Oct 23, 2015
     
+      (updated on Oct 6, 2016)
+    
   </time>
 
   
@@ -276,7 +278,7 @@
 <span class="cp">#![feature(unique)]</span><span class="w"></span>
 </code></pre></div>
 
-<h2 id="printing-to-screen">Printing to Screen</h2>
+<h2 id="printing-characters">Printing Characters</h2>
 
 <p>Now we can use the <code>Writer</code> to modify the buffer&rsquo;s characters. First we create a method to write a single ASCII byte (it doesn&rsquo;t compile yet):</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="k">impl</span><span class="w"> </span><span class="n">Writer</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
@@ -291,9 +293,10 @@
 <span class="w">                </span><span class="kd">let</span><span class="w"> </span><span class="n">row</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BUFFER_HEIGHT</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
 <span class="w">                </span><span class="kd">let</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">column_position</span><span class="p">;</span><span class="w"></span>
 
+<span class="w">                </span><span class="kd">let</span><span class="w"> </span><span class="n">color_code</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">color_code</span><span class="p">;</span><span class="w"></span>
 <span class="w">                </span><span class="bp">self</span><span class="p">.</span><span class="n">buffer</span><span class="p">().</span><span class="n">chars</span><span class="p">[</span><span class="n">row</span><span class="p">][</span><span class="n">col</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ScreenChar</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">                    </span><span class="n">ascii_character</span><span class="o">:</span><span class="w"> </span><span class="n">byte</span><span class="p">,</span><span class="w"></span>
-<span class="w">                    </span><span class="n">color_code</span><span class="o">:</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">color_code</span><span class="p">,</span><span class="w"></span>
+<span class="w">                    </span><span class="n">color_code</span><span class="o">:</span><span class="w"> </span><span class="n">color_code</span><span class="p">,</span><span class="w"></span>
 <span class="w">                </span><span class="p">};</span><span class="w"></span>
 <span class="w">                </span><span class="bp">self</span><span class="p">.</span><span class="n">column_position</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
 <span class="w">            </span><span class="p">}</span><span class="w"></span>
@@ -318,12 +321,38 @@
 
 <p>When we try to compile it, we get the following error:</p>
 
-<pre><code>error: cannot move out of borrowed content [E0507]
-    color_code: self.color_code,
-                ^~~~
+<pre><code>error[E0507]: cannot move out of borrowed content
+  --&gt; src/vga_buffer.rs:79:34
+   |
+79 | let color_code = self.color_code;
+   |                  ^^^^ cannot move out of borrowed content
 </code></pre>
 
-<p>The reason it that Rust <em>moves</em> values by default instead of copying them like other languages. And we cannot move <code>color_code</code> out of <code>self</code> because we only borrowed <code>self</code>. For more information check out the <a href="https://doc.rust-lang.org/book/ownership.html">ownership section</a> in the Rust book. To fix it, we can implement the <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html">Copy trait</a> for the <code>ColorCode</code> type by adding <code>#[derive(Clone, Copy)]</code> to its struct.</p>
+<p>The reason it that Rust <em>moves</em> values by default instead of copying them like other languages. And we cannot move <code>color_code</code> out of <code>self</code> because we only borrowed <code>self</code>. For more information check out the <a href="https://doc.rust-lang.org/book/ownership.html">ownership section</a> in the Rust book.</p>
+
+<p>To fix it, we can implement the <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html">Copy</a> trait for the <code>ColorCode</code> type. The easiest way to do this is to use the built-in <a href="http://rustbyexample.com/trait/derive.html">derive macro</a>:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="hll"><span class="cp">#[derive(Debug, Clone, Copy)]</span><span class="w"></span>
+</span><span class="k">struct</span><span class="w"> </span><span class="n">ColorCode</span><span class="p">(</span><span class="kt">u8</span><span class="p">);</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>We also derive the <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html">Clone</a> trait, since it&rsquo;s a requirement for <code>Copy</code>, and the <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html">Debug</a> trait, which allows us to print this field for debugging purposes.</p>
+
+<p>Now our project should compile again.</p>
+
+<p>However, the <a href="https://doc.rust-lang.org/core/marker/trait.Copy.html#when-should-my-type-be-copy">documentation for Copy</a> says: <em>“if your type can implement Copy, it should”</em>. Therefore we also derive Copy for <code>Color</code> and <code>ScreenChar</code>:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="cp">#[allow(dead_code)]</span><span class="w"></span>
+<span class="hll"><span class="cp">#[derive(Debug, Clone, Copy)]</span><span class="w"></span>
+</span><span class="cp">#[repr(u8)]</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">enum</span><span class="w"> </span><span class="n">Color</span><span class="w"> </span><span class="p">{...}</span><span class="w"></span>
+
+<span class="hll"><span class="cp">#[derive(Debug, Clone, Copy)]</span><span class="w"></span>
+</span><span class="cp">#[repr(C)]</span><span class="w"></span>
+<span class="k">struct</span><span class="w"> </span><span class="n">ScreenChar</span><span class="w"> </span><span class="p">{...}</span><span class="w"></span>
+</code></pre></div>
+
 
 <h3 id="try-it-out">Try it out!</h3>
 
@@ -341,7 +370,68 @@
 
 <p>It just creates a new Writer that points to the VGA buffer at <code>0xb8000</code>. Then it writes the byte <code>b'H'</code> to it. The <code>b</code> prefix creates a <a href="https://doc.rust-lang.org/reference.html#characters-and-strings">byte character</a>, which represents an ASCII code point. When we call <code>vga_buffer::print_something</code> in main, a <code>H</code> should be printed in the <em>lower</em> left corner of the screen in light green.</p>
 
-<h3 id="printing-strings">Printing Strings</h3>
+<h3 id="volatile">Volatile</h3>
+
+<p>We just saw that our <code>H</code> was printed correctly. However, it might not work with future Rust compilers that optimize more aggressively.</p>
+
+<p>The problem is that we only write to the <code>Buffer</code> and never read from it again. The compiler doesn&rsquo;t know about the side effect that some characters appear on the screen. So it might decide that these writes are unnecessary and can be omitted.</p>
+
+<p>To avoid this erroneous optimization, we need to specify these writes as <em><a href="https://en.wikipedia.org/wiki/Volatile_(computer_programming)">volatile</a></em>. This tells the compiler that the write has side effects and should not be optimized away.</p>
+
+<p>In order to use volatile writes for the VGA buffer, we use the <a href="https://docs.rs/volatile">volatile</a> library. This <em>crate</em> (this is how packages are called in the Rust world) provides a <code>Volatile</code> wrapper type with <code>read</code> and <code>write</code> methods. These methods internally use the <a href="https://doc.rust-lang.org/nightly/core/ptr/fn.read_volatile.html">read_volatile</a> and <a href="https://doc.rust-lang.org/nightly/core/ptr/fn.write_volatile.html">write_volatile</a> functions of the standard library and thus guarantee that the reads/writes are not optimized away.</p>
+
+<p>We can add a dependency on the <code>volatile</code> crate by adding it to the <code>dependencies</code> section of our <code>Cargo.toml</code>:</p>
+<div class="highlight"><pre><code class="language-toml" data-lang="toml"><span></span><span class="c1"># in Cargo.toml</span>
+
+<span class="p">[</span><span class="n">dependencies</span><span class="p">]</span>
+<span class="n">volatile</span> <span class="o">=</span> <span class="s">&quot;0.1.0&quot;</span>
+</code></pre></div>
+
+<p>The <code>0.1.0</code> is the <a href="http://semver.org/">semantic</a> version number. For more information, see the <a href="http://doc.crates.io/specifying-dependencies.html">Specifying Dependencies</a> guide of the cargo documentation.</p>
+
+<p>Now we&rsquo;ve declared that our project depends on the <code>volatile</code> crate and are able to import it in <code>src/lib.rs</code>:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/lib.rs</span>
+
+<span class="k">extern</span><span class="w"> </span><span class="k">crate</span><span class="w"> </span><span class="n">volatile</span><span class="p">;</span><span class="w"></span>
+</code></pre></div>
+
+<p>Let&rsquo;s use it to make writes to the VGA buffer volatile. We update our <code>Buffer</code> type as follows:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/vga_buffer.rs</span>
+
+<span class="kn">use</span><span class="w"> </span><span class="n">volatile</span><span class="o">::</span><span class="n">Volatile</span><span class="p">;</span><span class="w"></span>
+
+<span class="k">struct</span><span class="w"> </span><span class="n">Buffer</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">chars</span><span class="o">:</span><span class="w"> </span><span class="p">[[</span><span class="n">Volatile</span><span class="o">&lt;</span><span class="n">ScreenChar</span><span class="o">&gt;</span><span class="p">;</span><span class="w"> </span><span class="n">BUFFER_WIDTH</span><span class="p">];</span><span class="w"> </span><span class="n">BUFFER_HEIGHT</span><span class="p">],</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>Instead of a <code>ScreenChar</code>, we&rsquo;re now using a <code>Volatile&lt;ScreenChar&gt;</code>. (The <code>Volatile</code> type is <a href="https://doc.rust-lang.org/book/generics.html">generic</a> and can wrap (almost) any type). This ensures that we can&rsquo;t accidentally write to it through a “normal” write. Instead, we have to use the <code>write</code> method now.</p>
+
+<p>This means that we have to update our <code>Writer::write_byte</code> method:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="k">impl</span><span class="w"> </span><span class="n">Writer</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">write_byte</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">byte</span><span class="o">:</span><span class="w"> </span><span class="kt">u8</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">match</span><span class="w"> </span><span class="n">byte</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="sc">b&#39;\n&#39;</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">new_line</span><span class="p">(),</span><span class="w"></span>
+<span class="w">            </span><span class="n">byte</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="p">...</span><span class="w"></span>
+
+<span class="hll"><span class="w">                </span><span class="bp">self</span><span class="p">.</span><span class="n">buffer</span><span class="p">().</span><span class="n">chars</span><span class="p">[</span><span class="n">row</span><span class="p">][</span><span class="n">col</span><span class="p">].</span><span class="n">write</span><span class="p">(</span><span class="n">ScreenChar</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+</span><span class="w">                    </span><span class="n">ascii_character</span><span class="o">:</span><span class="w"> </span><span class="n">byte</span><span class="p">,</span><span class="w"></span>
+<span class="w">                    </span><span class="n">color_code</span><span class="o">:</span><span class="w"> </span><span class="n">color_code</span><span class="p">,</span><span class="w"></span>
+<span class="hll"><span class="w">                </span><span class="p">});</span><span class="w"></span>
+</span><span class="w">                </span><span class="p">...</span><span class="w"></span>
+<span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="p">...</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>Instead of a normal assignment using <code>=</code>, we&rsquo;re now using the <code>write</code> method. This guarantees that the compiler will never optimize away this write.</p>
+
+<h2 id="printing-strings">Printing Strings</h2>
 
 <p>To print whole strings, we can convert them to bytes and print them one-by-one:</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in `impl Writer`</span>
@@ -388,9 +478,12 @@
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in `impl Writer`</span>
 
 <span class="k">fn</span><span class="w"> </span><span class="n">new_line</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">row</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="mi">0</span><span class="p">..(</span><span class="n">BUFFER_HEIGHT</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">buffer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">buffer</span><span class="p">();</span><span class="w"></span>
-<span class="w">        </span><span class="n">buffer</span><span class="p">.</span><span class="n">chars</span><span class="p">[</span><span class="n">row</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">buffer</span><span class="p">.</span><span class="n">chars</span><span class="p">[</span><span class="n">row</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]</span><span class="w"></span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">row</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="mi">1</span><span class="p">..</span><span class="n">BUFFER_HEIGHT</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="mi">0</span><span class="p">..</span><span class="n">BUFFER_WIDTH</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="n">buffer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">buffer</span><span class="p">();</span><span class="w"></span>
+<span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="n">character</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">buffer</span><span class="p">.</span><span class="n">chars</span><span class="p">[</span><span class="n">row</span><span class="p">][</span><span class="n">col</span><span class="p">].</span><span class="n">read</span><span class="p">();</span><span class="w"></span>
+<span class="w">            </span><span class="n">buffer</span><span class="p">.</span><span class="n">chars</span><span class="p">[</span><span class="n">row</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">][</span><span class="n">col</span><span class="p">].</span><span class="n">write</span><span class="p">(</span><span class="n">character</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
 <span class="w">    </span><span class="p">}</span><span class="w"></span>
 <span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">clear_row</span><span class="p">(</span><span class="n">BUFFER_HEIGHT</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
 <span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">column_position</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
@@ -399,14 +492,7 @@
 <span class="k">fn</span><span class="w"> </span><span class="n">clear_row</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">row</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="cm">/* TODO */</span><span class="p">}</span><span class="w"></span>
 </code></pre></div>
 
-<p>We just move each line to the line above. Notice that the range notation (<code>..</code>) is exclusive the upper bound. But when we try to compile it, we get an borrow checker error again:</p>
-
-<pre><code>error: cannot move out of indexed content [E0507]
-    buffer.chars[row] = buffer.chars[row + 1]
-                        ^~~~~~~~~~~~~~~~~~~~~
-</code></pre>
-
-<p>It&rsquo;s because of Rust&rsquo;s move semantics again: We try to move out the <code>ScreenChar</code> at <code>row + 1</code>. If Rust would allow that, the array would become invalid as it would contain some valid and some moved out values. Fortunately, the <code>ScreenChar</code> type meets all criteria for the <a href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html">Copy trait</a>, so we can fix the problem by adding <code>#[derive(Clone, Copy)]</code> to <code>ScreenChar</code>.</p>
+<p>We iterate over all screen characters and move each characters one row up. Note that the range notation (<code>..</code>) is exclusive the upper bound. We also omit the 0th row (the first range starts at <code>1</code>) because it&rsquo;s the row that is shifted off screen.</p>
 
 <p>Now we only need to implement the <code>clear_row</code> method to finish the newline code:</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in `impl Writer`</span>
@@ -415,9 +501,13 @@
 <span class="w">        </span><span class="n">ascii_character</span><span class="o">:</span><span class="w"> </span><span class="sc">b&#39; &#39;</span><span class="p">,</span><span class="w"></span>
 <span class="w">        </span><span class="n">color_code</span><span class="o">:</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">color_code</span><span class="p">,</span><span class="w"></span>
 <span class="w">    </span><span class="p">};</span><span class="w"></span>
-<span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">buffer</span><span class="p">().</span><span class="n">chars</span><span class="p">[</span><span class="n">row</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="n">blank</span><span class="p">;</span><span class="w"> </span><span class="n">BUFFER_WIDTH</span><span class="p">];</span><span class="w"></span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">col</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="mi">0</span><span class="p">..</span><span class="n">BUFFER_WIDTH</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="bp">self</span><span class="p">.</span><span class="n">buffer</span><span class="p">().</span><span class="n">chars</span><span class="p">[</span><span class="n">row</span><span class="p">][</span><span class="n">col</span><span class="p">].</span><span class="n">write</span><span class="p">(</span><span class="n">blank</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </code></pre></div>
+
+<p>This method clears a row by overwriting all of its characters with a space character.</p>
 
 <h2 id="providing-an-interface">Providing an Interface</h2>
 
