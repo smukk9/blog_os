@@ -321,7 +321,26 @@
 
 <p>Replace <code>sdX</code> by the device name of your USB stick. But <strong>be careful</strong>! The command will erase everything on that device.</p>
 
-<p>When we boot from this USB stick now, we see that our computer reboots just before printing the exception message. So our code, which worked well in QEMU, <em>causes a triple fault</em> on real hardware. What&rsquo;s happening?</p>
+<p>Now we should be able to boot from this USB stick. When we do it, we see that it works fine on real hardware, too. Great!</p>
+
+<p>However, this section wouldn&rsquo;t exist if there weren&rsquo;t a problem. To trigger this problem, we add some example code to the start of our <code>divide_by_zero_handler</code>:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
+
+<span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">divide_by_zero_handler</span><span class="p">(...)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="k">u64</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="k">u64</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="k">u64</span><span class="p">);</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">x</span><span class="p">);</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="p">(</span><span class="mi">0</span><span class="p">..</span><span class="mi">100</span><span class="p">).</span><span class="n">map</span><span class="p">(</span><span class="o">|</span><span class="n">z</span><span class="o">|</span><span class="w"> </span><span class="p">(</span><span class="n">z</span><span class="p">,</span><span class="w"> </span><span class="n">z</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">))</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
+</span>
+<span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">print_error</span><span class="p">(...));</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="k">loop</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>This is just some garbage code that doesn&rsquo;t do anything useful. When we try it in QEMU using <code>make run</code>, it still works fine. However, when we burn it to an USB stick again and boot from it on real hardware, we see that our computer reboots just before printing the exception message.</p>
+
+<p>So our code, which worked well in QEMU, <em>causes a triple fault</em> on real hardware. What&rsquo;s happening?</p>
 
 <h3 id="reproducing-the-bug-in-qemu">Reproducing the Bug in QEMU</h3>
 
