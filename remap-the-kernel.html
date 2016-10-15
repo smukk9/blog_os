@@ -84,13 +84,6 @@
 
 <p>As always, you can find the source code on <a href="https://github.com/phil-opp/blog_os/tree/remap_the_kernel">Github</a>. Don&rsquo;t hesitate to file issues there if you have any problems or improvement suggestions. There is also a comment section at the end of this page. Note that this post requires a current Rust nightly.</p>
 
-<p><em>Updates</em>:</p>
-
-<ul>
-<li>The <code>AreaFrameAllocator</code> <a href="https://github.com/phil-opp/blog_os/issues/126">was broken</a> after switching to a new table. To fix this, we added the <a href="#fixing-the-frame-allocator">Fixing the Frame Allocator</a> section and updated the <a href="#page-align-sections">linker script</a>. For a complete set of changes see <a href="https://github.com/phil-opp/blog_os/pull/131">#131</a> and <a href="https://github.com/phil-opp/blog_os/compare/75aa669cdbb427c7bf0485c68692d243065cd3e9...635f7d3f9dced752f84d429e1d51f5c2b29854e3">this diff</a>.</li>
-<li>We <a href="https://github.com/phil-opp/blog_os/pull/141">fixed a bug</a> in iterating over a section&rsquo;s frames. Therefor we added a <code>Frame::range_inclusive</code> function and updated the <a href="#remapping-the-kernel">Remapping the Kernel section</a>. For a complete list of changes check out <a href="https://github.com/phil-opp/blog_os/commit/03ed3ce9a0758bf0d14a13144892c731216e25c6">this diff</a>.</li>
-</ul>
-
 <h2 id="motivation">Motivation</h2>
 
 <p>In the <a href="/modifying-page-tables.html">previous post</a>, we had a strange bug in the <code>unmap</code> function. Its reason was a silent stack overflow, which corrupted the page tables. Fortunately, our kernel stack is right above the page tables so that we noticed the overflow relatively quickly. This won&rsquo;t be the case when we add threads with new stacks in the future. Then a silent stack overflow could overwrite some data without us noticing. But eventually some completely unrelated function fails because a variable changed its value.</p>

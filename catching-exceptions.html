@@ -84,8 +84,6 @@
 
 <p>As always, the complete source code is on <a href="https://github.com/phil-opp/blog_os/tree/catching_exceptions">Github</a>. Please file <a href="https://github.com/phil-opp/blog_os/issues">issues</a> for any problems, questions, or improvement suggestions. There is also a comment section at the end of this page.</p>
 
-<p><strong>Update</strong>: Due to a subtle <a href="https://github.com/phil-opp/blog_os/issues/184">stack alignment bug</a>, we no longer catch page faults in this post. Instead, we catch divide-by-zero errors.</p>
-
 <h2 id="exceptions">Exceptions</h2>
 
 <p>An exception signals that something is wrong with the current instruction. For example, the CPU issues an exception if the current instruction tries to divide by 0. When an exception occurs, the CPU interrupts its current work and immediately calls a specific exception handler function, depending on the exception type.</p>

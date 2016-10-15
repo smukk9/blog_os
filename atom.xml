@@ -1582,8 +1582,6 @@ RSI=[...] RDI=[...] RBP=0000000000118d28 RSP=[...]
 
 &lt;p&gt;As always, the complete source code is on &lt;a href=&#34;https://github.com/phil-opp/blog_os/tree/catching_exceptions&#34;&gt;Github&lt;/a&gt;. Please file &lt;a href=&#34;https://github.com/phil-opp/blog_os/issues&#34;&gt;issues&lt;/a&gt; for any problems, questions, or improvement suggestions. There is also a comment section at the end of this page.&lt;/p&gt;
 
-&lt;p&gt;&lt;strong&gt;Update&lt;/strong&gt;: Due to a subtle &lt;a href=&#34;https://github.com/phil-opp/blog_os/issues/184&#34;&gt;stack alignment bug&lt;/a&gt;, we no longer catch page faults in this post. Instead, we catch divide-by-zero errors.&lt;/p&gt;
-
 &lt;h2 id=&#34;exceptions&#34;&gt;Exceptions&lt;/h2&gt;
 
 &lt;p&gt;An exception signals that something is wrong with the current instruction. For example, the CPU issues an exception if the current instruction tries to divide by 0. When an exception occurs, the CPU interrupts its current work and immediately calls a specific exception handler function, depending on the exception type.&lt;/p&gt;
@@ -3068,13 +3066,6 @@ in memory::init in src/memory/mod.rs:
 &lt;aside id=&#34;toc&#34;&gt;&lt;/aside&gt;
 
 &lt;p&gt;As always, you can find the source code on &lt;a href=&#34;https://github.com/phil-opp/blog_os/tree/remap_the_kernel&#34;&gt;Github&lt;/a&gt;. Don&amp;rsquo;t hesitate to file issues there if you have any problems or improvement suggestions. There is also a comment section at the end of this page. Note that this post requires a current Rust nightly.&lt;/p&gt;
-
-&lt;p&gt;&lt;em&gt;Updates&lt;/em&gt;:&lt;/p&gt;
-
-&lt;ul&gt;
-&lt;li&gt;The &lt;code&gt;AreaFrameAllocator&lt;/code&gt; &lt;a href=&#34;https://github.com/phil-opp/blog_os/issues/126&#34;&gt;was broken&lt;/a&gt; after switching to a new table. To fix this, we added the &lt;a href=&#34;#fixing-the-frame-allocator&#34;&gt;Fixing the Frame Allocator&lt;/a&gt; section and updated the &lt;a href=&#34;#page-align-sections&#34;&gt;linker script&lt;/a&gt;. For a complete set of changes see &lt;a href=&#34;https://github.com/phil-opp/blog_os/pull/131&#34;&gt;#131&lt;/a&gt; and &lt;a href=&#34;https://github.com/phil-opp/blog_os/compare/75aa669cdbb427c7bf0485c68692d243065cd3e9...635f7d3f9dced752f84d429e1d51f5c2b29854e3&#34;&gt;this diff&lt;/a&gt;.&lt;/li&gt;
-&lt;li&gt;We &lt;a href=&#34;https://github.com/phil-opp/blog_os/pull/141&#34;&gt;fixed a bug&lt;/a&gt; in iterating over a section&amp;rsquo;s frames. Therefor we added a &lt;code&gt;Frame::range_inclusive&lt;/code&gt; function and updated the &lt;a href=&#34;#remapping-the-kernel&#34;&gt;Remapping the Kernel section&lt;/a&gt;. For a complete list of changes check out &lt;a href=&#34;https://github.com/phil-opp/blog_os/commit/03ed3ce9a0758bf0d14a13144892c731216e25c6&#34;&gt;this diff&lt;/a&gt;.&lt;/li&gt;
-&lt;/ul&gt;
 
 &lt;h2 id=&#34;motivation&#34;&gt;Motivation&lt;/h2&gt;
 
@@ -5305,8 +5296,6 @@ multiboot_start: 0x11d400, multiboot_end: 0x11d9c8
 
 &lt;p&gt;(Don&amp;rsquo;t forget to add the &lt;code&gt;mod memory&lt;/code&gt; line to &lt;code&gt;src/lib.rs&lt;/code&gt;.) Instead of e.g. the start address, we just store the frame number. We use &lt;code&gt;usize&lt;/code&gt; here since the number of frames depends on the memory size. The long &lt;code&gt;derive&lt;/code&gt; line makes frames printable and comparable.&lt;/p&gt;
 
-&lt;p&gt;&lt;em&gt;Update&lt;/em&gt;: In a previous version, the &lt;code&gt;Clone&lt;/code&gt; and &lt;code&gt;Copy&lt;/code&gt; traits were derived, too. &lt;a href=&#34;https://github.com/phil-opp/blog_os/pull/52&#34;&gt;This was removed&lt;/a&gt; to make the allocator interface safer.&lt;/p&gt;
-
 &lt;p&gt;To make it easy to get the corresponding frame for a physical address, we add a &lt;code&gt;containing_address&lt;/code&gt; method:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;k&#34;&gt;pub&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;kr&#34;&gt;const&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;PAGE_SIZE&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;kt&#34;&gt;usize&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;=&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;4096&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
 
@@ -6091,8 +6080,6 @@ multiboot_start: 0x11d400, multiboot_end: 0x11d9c8
 
 &lt;p&gt;This blog post tries to set up Rust step-by-step and point out the different problems. If you have any questions, problems, or suggestions please &lt;a href=&#34;https://github.com/phil-opp/blog_os/issues&#34;&gt;file an issue&lt;/a&gt; or create a comment at the bottom. The code from this post is in a &lt;a href=&#34;https://github.com/phil-opp/blog_os/tree/set_up_rust&#34;&gt;Github repository&lt;/a&gt;, too.&lt;/p&gt;
 
-&lt;p&gt;&lt;strong&gt;Update&lt;/strong&gt;: We now use the &lt;code&gt;panic=abort&lt;/code&gt; cargo option instead of &lt;code&gt;-Z no-landing-pads&lt;/code&gt;. See &lt;a href=&#34;https://github.com/phil-opp/blog_os/pull/170&#34;&gt;#170&lt;/a&gt;.&lt;/p&gt;
-
 &lt;h2 id=&#34;installing-rust&#34;&gt;Installing Rust&lt;/h2&gt;
 
 &lt;p&gt;We need a nightly compiler, as we will use many unstable features. To manage Rust installations I highly recommend &lt;a href=&#34;https://www.rustup.rs/&#34;&gt;rustup&lt;/a&gt;. It allows you to install nightly, beta, and stable compilers side-by-side and makes it easy to update them. To use a nightly compiler for the current directory, you can run &lt;code&gt;rustup override add nightly&lt;/code&gt;.&lt;/p&gt;
@@ -6456,8 +6443,6 @@ check_exception old: 0x8 new 0xd
 &lt;aside id=&#34;toc&#34;&gt;&lt;/aside&gt;
 
 &lt;p&gt;I tried to explain everything in detail and to keep the code as simple as possible. If you have any questions, suggestions, or issues, please leave a comment or &lt;a href=&#34;https://github.com/phil-opp/blog_os/issues&#34;&gt;create an issue&lt;/a&gt; on Github. The source code is available in a &lt;a href=&#34;https://github.com/phil-opp/blog_os/tree/entering_longmode/src/arch/x86_64&#34;&gt;repository&lt;/a&gt;, too.&lt;/p&gt;
-
-&lt;p&gt;&lt;em&gt;Notable Changes&lt;/em&gt;: We don&amp;rsquo;t use 1GiB pages anymore, since they have &lt;a href=&#34;https://github.com/phil-opp/blog_os/issues/17&#34;&gt;compatibility problems&lt;/a&gt;. The identity mapping is now done through 2MiB pages.&lt;/p&gt;
 
 &lt;h2 id=&#34;some-tests&#34;&gt;Some Tests&lt;/h2&gt;
 

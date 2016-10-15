@@ -84,8 +84,6 @@
 
 <p>This blog post tries to set up Rust step-by-step and point out the different problems. If you have any questions, problems, or suggestions please <a href="https://github.com/phil-opp/blog_os/issues">file an issue</a> or create a comment at the bottom. The code from this post is in a <a href="https://github.com/phil-opp/blog_os/tree/set_up_rust">Github repository</a>, too.</p>
 
-<p><strong>Update</strong>: We now use the <code>panic=abort</code> cargo option instead of <code>-Z no-landing-pads</code>. See <a href="https://github.com/phil-opp/blog_os/pull/170">#170</a>.</p>
-
 <h2 id="installing-rust">Installing Rust</h2>
 
 <p>We need a nightly compiler, as we will use many unstable features. To manage Rust installations I highly recommend <a href="https://www.rustup.rs/">rustup</a>. It allows you to install nightly, beta, and stable compilers side-by-side and makes it easy to update them. To use a nightly compiler for the current directory, you can run <code>rustup override add nightly</code>.</p>
