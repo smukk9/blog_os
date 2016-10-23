@@ -3782,7 +3782,7 @@ SECTIONS {
 &lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;This function activates the given inactive table and returns the previous active table as a &lt;code&gt;InactivePageTable&lt;/code&gt;. We don&amp;rsquo;t need to flush the TLB here, as the CPU does it automatically when the P4 table is switched. In fact, the &lt;code&gt;tlb::flush_all&lt;/code&gt; function, which we used above, does nothing more than &lt;a href=&#34;https://github.com/gz/rust-x86/blob/master/src/tlb.rs#L19&#34;&gt;reloading the CR3 register&lt;/a&gt;.&lt;/p&gt;
+&lt;p&gt;This function activates the given inactive table and returns the previous active table as a &lt;code&gt;InactivePageTable&lt;/code&gt;. We don&amp;rsquo;t need to flush the TLB here, as the CPU does it automatically when the P4 table is switched. In fact, the &lt;code&gt;tlb::flush_all&lt;/code&gt; function, which we used above, does nothing more than &lt;a href=&#34;https://github.com/gz/rust-x86/blob/master/src/shared/tlb.rs#L19&#34;&gt;reloading the CR3 register&lt;/a&gt;.&lt;/p&gt;
 
 &lt;p&gt;Now we are finally able to switch to the new table. We do it by adding the following lines to our &lt;code&gt;remap_the_kernel&lt;/code&gt; function:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in remap_the_kernel in src/memory/paging/mod.rs&lt;/span&gt;
