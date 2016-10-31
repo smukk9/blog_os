@@ -3854,7 +3854,7 @@ check_exception old: 0xffffffff new 0xe
 
 &lt;p&gt;The reason is that the &lt;code&gt;NO_EXECUTE&lt;/code&gt; bit must only be used when the &lt;code&gt;NXE&lt;/code&gt; bit in the &lt;a href=&#34;https://en.wikipedia.org/wiki/Control_register#EFER&#34;&gt;Extended Feature Enable Register&lt;/a&gt; (EFER) is set. That register is similar to Rust&amp;rsquo;s feature gating and can be used to enable all sorts of advanced CPU features. Since the &lt;code&gt;NXE&lt;/code&gt; bit is off by default, we caused a page fault when we added the &lt;code&gt;NO_EXECUTE&lt;/code&gt; bit to the page table.&lt;/p&gt;
 
-&lt;p&gt;So we need to enable the &lt;code&gt;NXE&lt;/code&gt; bit. Therefor we use Gerd Zellweger&amp;rsquo;s awesome &lt;a href=&#34;https://github.com/gz/rust-x86&#34;&gt;x86&lt;/a&gt; crate again:&lt;/p&gt;
+&lt;p&gt;So we need to enable the &lt;code&gt;NXE&lt;/code&gt; bit. For that we use the awesome &lt;a href=&#34;https://github.com/gz/rust-x86&#34;&gt;x86&lt;/a&gt; crate again:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in lib.rs&lt;/span&gt;
 
 &lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;enable_nxe_bit&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;()&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;

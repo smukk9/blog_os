@@ -987,7 +987,7 @@ check_exception old: 0xffffffff new 0xe
 
 <p>The reason is that the <code>NO_EXECUTE</code> bit must only be used when the <code>NXE</code> bit in the <a href="https://en.wikipedia.org/wiki/Control_register#EFER">Extended Feature Enable Register</a> (EFER) is set. That register is similar to Rust&rsquo;s feature gating and can be used to enable all sorts of advanced CPU features. Since the <code>NXE</code> bit is off by default, we caused a page fault when we added the <code>NO_EXECUTE</code> bit to the page table.</p>
 
-<p>So we need to enable the <code>NXE</code> bit. Therefor we use Gerd Zellweger&rsquo;s awesome <a href="https://github.com/gz/rust-x86">x86</a> crate again:</p>
+<p>So we need to enable the <code>NXE</code> bit. For that we use the awesome <a href="https://github.com/gz/rust-x86">x86</a> crate again:</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in lib.rs</span>
 
 <span class="k">fn</span><span class="w"> </span><span class="n">enable_nxe_bit</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
