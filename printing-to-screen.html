@@ -368,7 +368,9 @@
 <span class="p">}</span><span class="w"></span>
 </code></pre></div>
 
-<p>It just creates a new Writer that points to the VGA buffer at <code>0xb8000</code>. Then it writes the byte <code>b'H'</code> to it. The <code>b</code> prefix creates a <a href="https://doc.rust-lang.org/reference.html#characters-and-strings">byte character</a>, which represents an ASCII code point. When we call <code>vga_buffer::print_something</code> in main, a <code>H</code> should be printed in the <em>lower</em> left corner of the screen in light green.</p>
+<p>It just creates a new Writer that points to the VGA buffer at <code>0xb8000</code>. Then it writes the byte <code>b'H'</code> to it. The <code>b</code> prefix creates a <a href="https://doc.rust-lang.org/reference.html#characters-and-strings">byte character</a>, which represents an ASCII code point. When we call <code>vga_buffer::print_something</code> in main, a <code>H</code> should be printed in the <em>lower</em> left corner of the screen in light green:</p>
+
+<p><img src="images/vga-H-lower-left.png" alt="QEMU output with a green `H` in the lower left corner" /></p>
 
 <h3 id="volatile">Volatile</h3>
 
@@ -448,9 +450,11 @@
 
 <h3 id="support-formatting-macros">Support Formatting Macros</h3>
 
-<p>It would be nice to support Rust&rsquo;s formatting macros, too. That way, we can easily print different types like integers or floats. To support them, we need to implement the <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Write.html">core::fmt::Write</a> trait. The only required method of this trait is <code>write_str</code> that looks quite similar to our <code>write_str</code> method. To implement the trait, we just need to move it into an <code>impl ::core::fmt::Write for Writer</code> block and add a return type:</p>
-<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="k">impl</span><span class="w"> </span><span class="o">::</span><span class="n">core</span><span class="o">::</span><span class="n">fmt</span><span class="o">::</span><span class="n">Write</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">Writer</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="n">write_str</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">::</span><span class="n">core</span><span class="o">::</span><span class="n">fmt</span><span class="o">::</span><span class="nb">Result</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<p>It would be nice to support Rust&rsquo;s formatting macros, too. That way, we can easily print different types like integers or floats. To support them, we need to implement the <a href="https://doc.rust-lang.org/nightly/core/fmt/trait.Write.html">core::fmt::Write</a> trait. The only required method of this trait is <code>write_str</code> that looks quite similar to our <code>write_str</code> method. To implement the trait, we just need to move it into an <code>impl fmt::Write for Writer</code> block and add a return type:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="kn">use</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">fmt</span><span class="p">;</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">fmt</span><span class="o">::</span><span class="n">Write</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">Writer</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="n">write_str</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">fmt</span><span class="o">::</span><span class="nb">Result</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="n">byte</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">bytes</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">          </span><span class="bp">self</span><span class="p">.</span><span class="n">write_byte</span><span class="p">(</span><span class="n">byte</span><span class="p">)</span><span class="w"></span>
 <span class="w">        </span><span class="p">}</span><span class="w"></span>
@@ -462,15 +466,17 @@
 <p>The <code>Ok(())</code> is just a <code>Ok</code> Result containing the <code>()</code> type. We can drop the <code>pub</code> because trait methods are always public.</p>
 
 <p>Now we can use Rust&rsquo;s built-in <code>write!</code>/<code>writeln!</code> formatting macros:</p>
-<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in the `print_something` function</span>
-<span class="kn">use</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">fmt</span><span class="o">::</span><span class="n">Write</span><span class="p">;</span><span class="w"></span>
-<span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">writer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Writer</span><span class="w"> </span><span class="p">{...};</span><span class="w"></span>
-<span class="n">writer</span><span class="p">.</span><span class="n">write_byte</span><span class="p">(</span><span class="sc">b&#39;H&#39;</span><span class="p">);</span><span class="w"></span>
-<span class="n">writer</span><span class="p">.</span><span class="n">write_str</span><span class="p">(</span><span class="s">&quot;ello! &quot;</span><span class="p">);</span><span class="w"></span>
-<span class="n">write</span><span class="o">!</span><span class="p">(</span><span class="n">writer</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;The numbers are {} and {}&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">42</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="o">/</span><span class="mf">3.0</span><span class="p">);</span><span class="w"></span>
-</code></pre></div>
 
-<p>Now you should see a <code>Hello! The numbers are 42 and 0.3333333333333333</code> in strange colors at the bottom of the screen.</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in the `print_something` function</span>
+<span class="hll"><span class="kn">use</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">fmt</span><span class="o">::</span><span class="n">Write</span><span class="p">;</span><span class="w"></span>
+</span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">writer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Writer</span><span class="w"> </span><span class="p">{...};</span><span class="w"></span>
+<span class="hll"><span class="n">writer</span><span class="p">.</span><span class="n">write_byte</span><span class="p">(</span><span class="sc">b&#39;H&#39;</span><span class="p">);</span><span class="w"></span>
+</span><span class="hll"><span class="n">writer</span><span class="p">.</span><span class="n">write_str</span><span class="p">(</span><span class="s">&quot;ello! &quot;</span><span class="p">);</span><span class="w"></span>
+</span><span class="hll"><span class="n">write</span><span class="o">!</span><span class="p">(</span><span class="n">writer</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;The numbers are {} and {}&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">42</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="o">/</span><span class="mf">3.0</span><span class="p">);</span><span class="w"></span>
+</span></code></pre></div>
+
+
+<p>Now you should see a <code>Hello! The numbers are 42 and 0.3333333333333333</code> at the bottom of the screen.</p>
 
 <h3 id="newlines">Newlines</h3>
 
@@ -571,28 +577,32 @@
 <span class="p">}</span><span class="w"></span>
 </code></pre></div>
 
-<p>It just adds a <code>\n</code> and then invokes the <a href="https://doc.rust-lang.org/nightly/std/macro.print!.html"><code>print!</code> macro</a>, which is defined as:</p>
+<p>Macros are defined through one or more rules, which are similar to <code>match</code> arms. The <code>println</code> macro has two rules: The first rule is for invocations with a single argument (e.g. <code>println!(&quot;Hello&quot;)</code>) and the second rule is for invocations with additional parameters (e.g. <code>println!(&quot;{}{}&quot;, 4, 2)</code>).</p>
+
+<p>Both rules simply append a newline character (<code>\n</code>) to the format string and then invoke the <a href="https://doc.rust-lang.org/nightly/std/macro.print!.html"><code>print!</code> macro</a>, which is defined as:</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="n">macro_rules</span><span class="o">!</span><span class="w"> </span><span class="n">print</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="p">(</span><span class="cp">$($arg</span><span class="o">:</span><span class="n">tt</span><span class="p">)</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">(</span><span class="cp">$crate</span><span class="o">::</span><span class="n">io</span><span class="o">::</span><span class="n">_print</span><span class="p">(</span><span class="n">format_args</span><span class="o">!</span><span class="p">(</span><span class="cp">$($arg</span><span class="p">)</span><span class="o">*</span><span class="p">)));</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </code></pre></div>
 
-<p>It calls the <code>_print</code> method in the <code>io</code> module of the current crate (<code>$crate</code>), which is <code>std</code>. The <a href="https://doc.rust-lang.org/nightly/src/std/io/stdio.rs.html#578"><code>_print</code> function</a> in libstd is rather complicated, as it supports different <code>Stdout</code> devices.</p>
+<p>The macro expands to a call of the <a href="https://github.com/rust-lang/rust/blob/46d39f3329487115e7d7dcd37bc64eea6ef9ba4e/src/libstd/io/stdio.rs#L631"><code>_print</code> function</a> in the <code>io</code> module. The <a href="https://doc.rust-lang.org/book/macros.html#the-variable-crate"><code>$crate</code> variable</a> ensures that the macro also works from outside the <code>std</code> crate. For example, it expands to <code>::std</code> when it&rsquo;s used in other crates.</p>
+
+<p>The <a href="https://doc.rust-lang.org/nightly/std/macro.format_args.html"><code>format_args</code> macro</a> builds a <a href="https://doc.rust-lang.org/nightly/core/fmt/struct.Arguments.html">fmt::Arguments</a> type from the passed arguments, which is passed to <code>_print</code>. The <a href="https://github.com/rust-lang/rust/blob/46d39f3329487115e7d7dcd37bc64eea6ef9ba4e/src/libstd/io/stdio.rs#L631"><code>_print</code> function</a> of libstd is rather complicated, as it supports different <code>Stdout</code> devices. We don&rsquo;t need that complexity since we just want to print to the VGA buffer.</p>
 
 <p>To print to the VGA buffer, we just copy the <code>println!</code> macro and modify the <code>print!</code> macro to use our static <code>WRITER</code> instead of <code>_print</code>:</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/vga_buffer.rs</span>
 <span class="n">macro_rules</span><span class="o">!</span><span class="w"> </span><span class="n">print</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="p">(</span><span class="cp">$($arg</span><span class="o">:</span><span class="n">tt</span><span class="p">)</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">({</span><span class="w"></span>
-<span class="w">            </span><span class="kn">use</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">fmt</span><span class="o">::</span><span class="n">Write</span><span class="p">;</span><span class="w"></span>
-<span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">writer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cp">$crate</span><span class="o">::</span><span class="n">vga_buffer</span><span class="o">::</span><span class="n">WRITER</span><span class="p">.</span><span class="n">lock</span><span class="p">();</span><span class="w"></span>
-<span class="w">            </span><span class="n">writer</span><span class="p">.</span><span class="n">write_fmt</span><span class="p">(</span><span class="n">format_args</span><span class="o">!</span><span class="p">(</span><span class="cp">$($arg</span><span class="p">)</span><span class="o">*</span><span class="p">)).</span><span class="n">unwrap</span><span class="p">();</span><span class="w"></span>
+<span class="w">        </span><span class="kn">use</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">fmt</span><span class="o">::</span><span class="n">Write</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">writer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cp">$crate</span><span class="o">::</span><span class="n">vga_buffer</span><span class="o">::</span><span class="n">WRITER</span><span class="p">.</span><span class="n">lock</span><span class="p">();</span><span class="w"></span>
+<span class="w">        </span><span class="n">writer</span><span class="p">.</span><span class="n">write_fmt</span><span class="p">(</span><span class="n">format_args</span><span class="o">!</span><span class="p">(</span><span class="cp">$($arg</span><span class="p">)</span><span class="o">*</span><span class="p">)).</span><span class="n">unwrap</span><span class="p">();</span><span class="w"></span>
 <span class="w">    </span><span class="p">});</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </code></pre></div>
 
 <p>Instead of a <code>_print</code> function, we call the <code>write_fmt</code> method of our static <code>Writer</code>. Since we&rsquo;re using a method from the <code>Write</code> trait, we need to import it before. The additional <code>unwrap()</code> at the end panics if printing isn&rsquo;t successful. But since we always return <code>Ok</code> in <code>write_str</code>, that should not happen.</p>
 
-<p>Note the additional <code>{}</code> scope around the macro: I wrote <code>=&gt; ({…})</code> instead of <code>=&gt; (…)</code>. The additional <code>{}</code> avoids that the <code>Write</code> trait is silently imported when <code>print</code> is used.</p>
+<p>Note the additional <code>{}</code> scope around the macro: We write <code>=&gt; ({…})</code> instead of <code>=&gt; (…)</code>. The additional <code>{}</code> avoids that the <code>Write</code> trait is silently imported to the parent scope when <code>print</code> is used.</p>
 
 <h3 id="clearing-the-screen">Clearing the screen</h3>
 
@@ -608,22 +618,77 @@
 <h3 id="hello-world-using-println">Hello World using <code>println</code></h3>
 
 <p>To use <code>println</code> in <code>lib.rs</code>, we need to import the macros of the VGA buffer module first. Therefore we add a <code>#[macro_use]</code> attribute to the module declaration:</p>
+
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/lib.rs</span>
 
-<span class="cp">#[macro_use]</span><span class="w"></span>
-<span class="kn">mod</span><span class="w"> </span><span class="n">vga_buffer</span><span class="p">;</span><span class="w"></span>
+<span class="hll"><span class="cp">#[macro_use]</span><span class="w"></span>
+</span><span class="kn">mod</span><span class="w"> </span><span class="n">vga_buffer</span><span class="p">;</span><span class="w"></span>
 
 <span class="cp">#[no_mangle]</span><span class="w"></span>
 <span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">rust_main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="c1">// ATTENTION: we have a very small stack and no guard page</span>
-<span class="w">    </span><span class="n">vga_buffer</span><span class="o">::</span><span class="n">clear_screen</span><span class="p">();</span><span class="w"></span>
-<span class="w">    </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;Hello World{}&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;!&quot;</span><span class="p">);</span><span class="w"></span>
-
+<span class="hll"><span class="w">    </span><span class="n">vga_buffer</span><span class="o">::</span><span class="n">clear_screen</span><span class="p">();</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;Hello World{}&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;!&quot;</span><span class="p">);</span><span class="w"></span>
+</span>
 <span class="w">    </span><span class="k">loop</span><span class="p">{}</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </code></pre></div>
 
+
 <p>Since we imported the macros at crate level, they are available in all modules and thus provide an easy and safe interface to the VGA buffer.</p>
+
+<p>As expected, we now see a <em>“Hello World!”</em> on a cleared screen:</p>
+
+<p><img src="images/vga-hello-world.png" alt="QEMU printing “Hello World!” on a cleared screen" /></p>
+
+<h3 id="deadlocks">Deadlocks</h3>
+
+<p>Whenever we use locks, we must be careful to not accidentally introduce <em>deadlocks</em>. A <a href="https://en.wikipedia.org/wiki/Deadlock">deadlock</a> occurs when a thread/program waits for a lock that will never be released. Normally, this happens when multiple threads access multiple locks. For example, when thread A holds lock 1 and tries to acquire lock 2 and &ndash; at the same time &ndash; thread B holds lock 2 and tries to acquire lock 1.</p>
+
+<p>However, a deadlock can also occur when a thread tries to acquire the same lock twice. This way we can trigger a deadlock in our VGA driver:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in rust_main in src/lib.rs</span>
+
+<span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;{}&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;inner&quot;</span><span class="p">);</span><span class="w"> </span><span class="s">&quot;outer&quot;</span><span class="w"> </span><span class="p">});</span><span class="w"></span>
+</code></pre></div>
+
+<p>The argument passed to <code>println</code> is new block that resolves to the string <em>“outer”</em> (a block always returns the result of the last expression). But before returning “outer”, the block tries to print the string <em>“inner”</em>.</p>
+
+<p>When we try this code in QEMU, we see that neither of the strings are printed. To understand what&rsquo;s happening, we take a look at our <code>print</code> macro again:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="n">macro_rules</span><span class="o">!</span><span class="w"> </span><span class="n">print</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="p">(</span><span class="cp">$($arg</span><span class="o">:</span><span class="n">tt</span><span class="p">)</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">({</span><span class="w"></span>
+<span class="w">        </span><span class="kn">use</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">fmt</span><span class="o">::</span><span class="n">Write</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">writer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="cp">$crate</span><span class="o">::</span><span class="n">vga_buffer</span><span class="o">::</span><span class="n">WRITER</span><span class="p">.</span><span class="n">lock</span><span class="p">();</span><span class="w"></span>
+<span class="w">        </span><span class="n">writer</span><span class="p">.</span><span class="n">write_fmt</span><span class="p">(</span><span class="n">format_args</span><span class="o">!</span><span class="p">(</span><span class="cp">$($arg</span><span class="p">)</span><span class="o">*</span><span class="p">)).</span><span class="n">unwrap</span><span class="p">();</span><span class="w"></span>
+<span class="w">    </span><span class="p">});</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>So we <em>first</em> lock the <code>WRITER</code> and then we evaluate the arguments using <code>format_args</code>. The problem is that the argument in our code example contains another <code>println</code>, which tries to lock the <code>WRITER</code> again. So now the inner <code>println</code> waits for the outer <code>println</code> and vice versa. Thus, a deadlock occurs and the CPU spins endlessly.</p>
+
+<h3 id="fixing-the-deadlock">Fixing the Deadlock</h3>
+
+<p>In order to fix the deadlock, we need to evaluate the arguments <em>before</em> locking the <code>WRITER</code>. We can do so by moving the locking and printing logic into a new <code>print</code> function (like it&rsquo;s done in the standard library):</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/vga_buffer.rs</span>
+
+<span class="n">macro_rules</span><span class="o">!</span><span class="w"> </span><span class="n">print</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="p">(</span><span class="cp">$($arg</span><span class="o">:</span><span class="n">tt</span><span class="p">)</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">({</span><span class="w"></span>
+<span class="w">        </span><span class="cp">$crate</span><span class="o">::</span><span class="n">vga_buffer</span><span class="o">::</span><span class="n">print</span><span class="p">(</span><span class="n">format_args</span><span class="o">!</span><span class="p">(</span><span class="cp">$($arg</span><span class="p">)</span><span class="o">*</span><span class="p">));</span><span class="w"></span>
+<span class="w">    </span><span class="p">});</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">print</span><span class="p">(</span><span class="n">args</span><span class="o">:</span><span class="w"> </span><span class="n">fmt</span><span class="o">::</span><span class="n">Arguments</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="kn">use</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">fmt</span><span class="o">::</span><span class="n">Write</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">WRITER</span><span class="p">.</span><span class="n">lock</span><span class="p">().</span><span class="n">write_fmt</span><span class="p">(</span><span class="n">args</span><span class="p">).</span><span class="n">unwrap</span><span class="p">();</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>Now the macro only evaluates the arguments (through <code>format_args!</code>) and passes them to the new <code>print</code> function. The <code>print</code> function then locks the <code>WRITER</code> and prints the formatting arguments using <code>write_fmt</code>. So now the arguments are evaluated before locking the <code>WRITER</code>.</p>
+
+<p>Thus, we fixed the deadlock:</p>
+
+<p><img src="images/fixed-println-deadlock.png" alt="QEMU printing “inner” and then “outer”" /></p>
+
+<p>We see that both “inner” and “outer” are printed.</p>
 
 <h2 id="what-s-next">What&rsquo;s next?</h2>
 
