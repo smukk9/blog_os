@@ -103,7 +103,7 @@
 <p>Let&rsquo;s start by defining a handler function for the breakpoint exception:</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
 
-<span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="k">break</span><span class="n">point_handler</span><span class="p">(</span><span class="n">stack_frame</span><span class="o">:</span><span class="w"> </span><span class="o">*</span><span class="kr">const</span><span class="w"> </span><span class="n">ExceptionStackFrame</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">!</span><span class="w"></span>
+<span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="k">break</span><span class="n">point_handler</span><span class="p">(</span><span class="n">stack_frame</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="n">ExceptionStackFrame</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">!</span><span class="w"></span>
 <span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">stack_frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">&amp;*</span><span class="n">stack_frame</span><span class="w"> </span><span class="p">};</span><span class="w"></span>
 <span class="w">    </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\n</span><span class="s">EXCEPTION: BREAKPOINT at {:#x}</span><span class="se">\n</span><span class="s">{:#?}&quot;</span><span class="p">,</span><span class="w"></span>
@@ -221,7 +221,7 @@
 <span class="s">                      sub rsp, 8 // align the stack pointer</span>
 <span class="s">                      call $0&quot;</span><span class="w"></span>
 <span class="w">                      </span><span class="o">::</span><span class="w"> </span><span class="s">&quot;i&quot;</span><span class="p">(</span><span class="cp">$name</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="p">(</span><span class="w"></span>
-<span class="hll"><span class="w">                          </span><span class="o">*</span><span class="kr">const</span><span class="w"> </span><span class="n">ExceptionStackFrame</span><span class="p">))</span><span class="w"> </span><span class="c1">// no longer diverging</span>
+<span class="hll"><span class="w">                          </span><span class="o">&amp;</span><span class="n">ExceptionStackFrame</span><span class="p">))</span><span class="w"> </span><span class="c1">// no longer diverging</span>
 </span><span class="w">                      </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;rdi&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;intel&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;volatile&quot;</span><span class="p">);</span><span class="w"></span>
 
 <span class="w">                </span><span class="c1">// new</span>
@@ -243,16 +243,16 @@
 <div class="highlight"><pre><code class="language-diff" data-lang="diff"><span></span>// in src/interrupts/mod.rs
 
 extern &quot;C&quot; fn divide_by_zero_handler(
-<span class="gd">-   stack_frame: *const ExceptionStackFrame) -&gt; ! {...}</span>
-<span class="gi">+   stack_frame: *const ExceptionStackFrame) {...}</span>
+<span class="gd">-   stack_frame: &amp;ExceptionStackFrame) -&gt; ! {...}</span>
+<span class="gi">+   stack_frame: &amp;ExceptionStackFrame) {...}</span>
 
 extern &quot;C&quot; fn invalid_opcode_handler(
-<span class="gd">-   stack_frame: *const ExceptionStackFrame) -&gt; ! {...}</span>
-<span class="gi">+   stack_frame: *const ExceptionStackFrame) {...}</span>
+<span class="gd">-   stack_frame: &amp;ExceptionStackFrame) -&gt; ! {...}</span>
+<span class="gi">+   stack_frame: &amp;ExceptionStackFrame) {...}</span>
 
 extern &quot;C&quot; fn breakpoint_handler(
-<span class="gd">-   stack_frame: *const ExceptionStackFrame) -&gt; ! {</span>
-<span class="gi">+   stack_frame: *const ExceptionStackFrame) {</span>
+<span class="gd">-   stack_frame: &amp;ExceptionStackFrame) -&gt; ! {</span>
+<span class="gi">+   stack_frame: &amp;ExceptionStackFrame) {</span>
     println!(...);
 <span class="gd">-   loop {}</span>
 }
@@ -459,7 +459,7 @@ Breakpoint 1, blog_os::rust_main (multiboot_information_address=1539136)
 </span><span class="hll"><span class="s">                      // sub rsp, 8 (stack is aligned already)</span>
 </span><span class="s">                      call $0&quot;</span><span class="w"></span>
 <span class="w">                      </span><span class="o">::</span><span class="w"> </span><span class="s">&quot;i&quot;</span><span class="p">(</span><span class="cp">$name</span><span class="w"> </span><span class="k">as</span><span class="w"></span>
-<span class="w">                             </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="p">(</span><span class="o">*</span><span class="kr">const</span><span class="w"> </span><span class="n">ExceptionStackFrame</span><span class="p">))</span><span class="w"></span>
+<span class="w">                             </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ExceptionStackFrame</span><span class="p">))</span><span class="w"></span>
 <span class="w">                      </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;rdi&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;intel&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;volatile&quot;</span><span class="p">);</span><span class="w"></span>
 
 <span class="hll"><span class="w">                </span><span class="n">restore_scratch_registers</span><span class="o">!</span><span class="p">();</span><span class="w"></span>
@@ -794,7 +794,7 @@ warning: unused variable: `frame`…
 <span class="s">                      sub rsp, 8 // align the stack pointer</span>
 <span class="s">                      call $0&quot;</span><span class="w"></span>
 <span class="w">                      </span><span class="o">::</span><span class="w"> </span><span class="s">&quot;i&quot;</span><span class="p">(</span><span class="cp">$name</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="p">(</span><span class="w"></span>
-<span class="hll"><span class="w">                          </span><span class="o">*</span><span class="kr">const</span><span class="w"> </span><span class="n">ExceptionStackFrame</span><span class="p">,</span><span class="w"> </span><span class="kt">u64</span><span class="p">))</span><span class="w"></span>
+<span class="hll"><span class="w">                          </span><span class="o">&amp;</span><span class="n">ExceptionStackFrame</span><span class="p">,</span><span class="w"> </span><span class="kt">u64</span><span class="p">))</span><span class="w"></span>
 </span><span class="w">                      </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;rdi&quot;</span><span class="p">,</span><span class="s">&quot;rsi&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;intel&quot;</span><span class="p">);</span><span class="w"></span>
 <span class="hll"><span class="w">                </span><span class="n">asm</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;iretq&quot;</span><span class="w"> </span><span class="o">::::</span><span class="w"> </span><span class="s">&quot;intel&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;volatile&quot;</span><span class="p">);</span><span class="w"></span>
 </span><span class="w">                </span><span class="o">::</span><span class="n">core</span><span class="o">::</span><span class="n">intrinsics</span><span class="o">::</span><span class="n">unreachable</span><span class="p">();</span><span class="w"></span>
@@ -811,7 +811,7 @@ warning: unused variable: `frame`…
 <p>Now we can make our <code>page_fault_handler</code> non-diverging:</p>
 <div class="highlight"><pre><code class="language-diff" data-lang="diff"><span></span>// in src/interrupts/mod.rs
 
- extern &quot;C&quot; fn page_fault_handler(stack_frame: *const ExceptionStackFrame,
+ extern &quot;C&quot; fn page_fault_handler(stack_frame: &amp;ExceptionStackFrame,
 <span class="gd">-   error_code: u64) -&gt; ! { ... }</span>
 <span class="gi">+   error_code: u64) { ... }</span>
 </code></pre></div>
@@ -833,7 +833,7 @@ warning: unused variable: `frame`…
 <span class="s">                      call $0</span>
 <span class="hll"><span class="s">                      add rsp, 8 // undo stack pointer alignment</span>
 </span><span class="s">                      &quot;</span><span class="w"> </span><span class="o">::</span><span class="w"> </span><span class="s">&quot;i&quot;</span><span class="p">(</span><span class="cp">$name</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="p">(</span><span class="w"></span>
-<span class="w">                          </span><span class="o">*</span><span class="kr">const</span><span class="w"> </span><span class="n">ExceptionStackFrame</span><span class="p">,</span><span class="w"> </span><span class="kt">u64</span><span class="p">))</span><span class="w"></span>
+<span class="w">                          </span><span class="o">&amp;</span><span class="n">ExceptionStackFrame</span><span class="p">,</span><span class="w"> </span><span class="kt">u64</span><span class="p">))</span><span class="w"></span>
 <span class="w">                      </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;rdi&quot;</span><span class="p">,</span><span class="s">&quot;rsi&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;intel&quot;</span><span class="p">);</span><span class="w"></span>
 <span class="hll"><span class="w">                </span><span class="n">restore_scratch_registers</span><span class="o">!</span><span class="p">();</span><span class="w"></span>
 </span><span class="w">                </span><span class="n">asm</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;iretq&quot;</span><span class="w"> </span><span class="o">::::</span><span class="w"> </span><span class="s">&quot;intel&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;volatile&quot;</span><span class="p">);</span><span class="w"></span>
@@ -864,7 +864,7 @@ Now we backup the scratch registers to the stack right at the beginning and rest
 <span class="s">                      call $0</span>
 <span class="s">                      add rsp, 8 // undo stack pointer alignment</span>
 <span class="s">                      &quot;</span><span class="w"> </span><span class="o">::</span><span class="w"> </span><span class="s">&quot;i&quot;</span><span class="p">(</span><span class="cp">$name</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="p">(</span><span class="w"></span>
-<span class="w">                          </span><span class="o">*</span><span class="kr">const</span><span class="w"> </span><span class="n">ExceptionStackFrame</span><span class="p">,</span><span class="w"> </span><span class="kt">u64</span><span class="p">))</span><span class="w"></span>
+<span class="w">                          </span><span class="o">&amp;</span><span class="n">ExceptionStackFrame</span><span class="p">,</span><span class="w"> </span><span class="kt">u64</span><span class="p">))</span><span class="w"></span>
 <span class="w">                      </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;rdi&quot;</span><span class="p">,</span><span class="s">&quot;rsi&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;intel&quot;</span><span class="p">);</span><span class="w"></span>
 <span class="w">                </span><span class="n">restore_scratch_registers</span><span class="o">!</span><span class="p">();</span><span class="w"></span>
 <span class="hll"><span class="w">                </span><span class="n">asm</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;add rsp, 8 // pop error code</span>
@@ -912,53 +912,24 @@ ExceptionStackFrame {
 
 <p>The error code should still be <code>CAUSED_BY_WRITE</code> and the exception stack frame values should also be correct (e.g. <code>code_segment</code> should be 8 and <code>stack_segment</code> should be 16).</p>
 
-<h3 id="page-faults-as-breakpoints">Page Faults as Breakpoints</h3>
+<h4 id="returning-from-page-faults">Returning from Page Faults</h4>
 
-<p>We didn&rsquo;t test returns from the page fault handler yet. In order to test our <code>iretq</code> logic, we <em>temporary</em> define accesses to <code>0xdeadbeaf</code> as legal. They should behave exactly like the breakpoint exception: Print an error message and then continue with the next instruction.</p>
+<p>Let&rsquo;s see what happens if we comment out the trailing <code>loop</code> in our page fault handler:</p>
 
-<p>Therefore we update our <code>page_fault_handler</code>:</p>
+<p><img src="images/qemu-page-fault-return.png" alt="QEMU printing the same page fault message again and again" /></p>
 
-<p><div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
+<p>We see that the same error message is printed over and over again. Here is what happens:</p>
 
-<span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">page_fault_handler</span><span class="p">(</span><span class="n">stack_frame</span><span class="o">:</span><span class="w"> </span><span class="o">*</span><span class="kr">const</span><span class="w"> </span><span class="n">ExceptionStackFrame</span><span class="p">,</span><span class="w"></span>
-<span class="w">    </span><span class="n">error_code</span><span class="o">:</span><span class="w"> </span><span class="kt">u64</span><span class="p">)</span><span class="w"></span>
-<span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="kn">use</span><span class="w"> </span><span class="n">x86</span><span class="o">::</span><span class="n">controlregs</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="n">println</span><span class="o">!</span><span class="p">(...);</span><span class="w"></span>
+<ul>
+<li>The CPU executes <code>rust_main</code> and tries to access <code>0xdeadbeaf</code>. This causes a page fault.</li>
+<li>The page fault handler prints an error message and returns without fixing the cause of the exception (<code>0xdeadbeaf</code> is still unaccessible).</li>
+<li>The CPU restarts the instruction that caused the page fault and thus tries to access <code>0xdeadbeaf</code> again. Of course, this causes a page fault again.</li>
+<li>The page fault handler prints the error message and returns.</li>
+</ul>
 
-<span class="w">    </span><span class="c1">// new</span>
-<span class="hll"><span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-</span><span class="hll"><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">controlregs</span><span class="o">::</span><span class="n">cr2</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mh">0xdeadbeaf</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-</span><span class="hll"><span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="n">stack_frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="o">*</span><span class="p">(</span><span class="n">stack_frame</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="o">*</span><span class="k">mut</span><span class="w"> </span><span class="n">ExceptionStackFrame</span><span class="p">);</span><span class="w"></span>
-</span><span class="hll"><span class="w">            </span><span class="n">stack_frame</span><span class="p">.</span><span class="n">instruction_pointer</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">7</span><span class="p">;</span><span class="w"></span>
-</span><span class="hll"><span class="w">            </span><span class="k">return</span><span class="p">;</span><span class="w"></span>
-</span><span class="hll"><span class="w">        </span><span class="p">}</span><span class="w"></span>
-</span><span class="hll"><span class="w">    </span><span class="p">}</span><span class="w"></span>
-</span>
-<span class="w">    </span><span class="k">loop</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-</code></pre></div>
-<!--end*--></p>
+<p>… and so on. Thus, our code indefinitely jumps between the page fault handler and the instruction that accesses <code>0xdeadbeaf</code>.</p>
 
-<p>If the accessed memory address is <code>0xdeadbeaf</code> (the CPU stores this information in the <code>cr2</code> register), we don&rsquo;t <code>loop</code> endlessly. Instead we update the stored instruction pointer and return. Remember, the normal behavior when returning from a page fault is to restart the failing instruction. We don&rsquo;t want that, so we manipulate the stored instruction pointer to point to the next instruction.</p>
-
-<p>In our case, the page fault is caused by the instruction at address <code>1114753</code>, which is <code>0x110281</code> in hexadecimal. Let&rsquo;s examine this instruction using <code>objdump</code>:</p>
-
-<pre><code>&gt; objdump -d build/kernel-x86_64.bin | grep &quot;110281&quot;
-110281:	48 c7 02 2a 00 00 00 	movq   $0x2a,(%rdx)
-</code></pre>
-
-<p>It&rsquo;s a <code>movq</code> instruction with the 7 byte opcode <code>48 c7 02 2a 00 00 00</code>. So the next instruction starts 7 bytes after.</p>
-
-<p>Thus, we can jump to the next instruction in our <code>page_fault_handler</code> by adding <code>7</code> to the instruction pointer. <em>This is a horrible hack</em>, since the page fault could also be caused by other instructions with different opcode lengths. But it&rsquo;s good enough for a quick test.</p>
-
-<p>When we execute <code>make run</code> now, we should see the <em>“It did not crash”</em> message after the page fault:</p>
-
-<p><img src="images/qemu-page-fault-as-breakpoint.png" alt="QEMU showing the the page fault error and the “It did not crash” message" /></p>
-
-<p>Our <code>iretq</code> logic seems to work!</p>
-
-<p>Let&rsquo;s quickly remove the <code>0xdeadbeaf</code> hack from our <code>page_fault_handler</code> again and pretend that we&rsquo;ve never done that :).</p>
+<p>This is a good thing! It means that our <code>iretq</code> logic is working correctly, since it returns to the correct instruction every time. So our <code>handler_with_error_code</code> macro seems to be correct.</p>
 
 <h2 id="what-s-next">What&rsquo;s next?</h2>
 
