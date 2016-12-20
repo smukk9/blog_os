@@ -416,7 +416,7 @@
     <span class="nf">ret</span>
 </code></pre></div>
 
-<p>Maybe I first explain how an assembly loop works. We use the <code>ecx</code> register as a counter variable, just like <code>i</code> in a for loop. After mapping the <code>ecx-th</code> entry, we increase <code>ecx</code> by one and jump to <code>.map_p2_table</code> again if it&rsquo;s still smaller 512.</p>
+<p>Maybe I should first explain how an assembly loop works. We use the <code>ecx</code> register as a counter variable, just like <code>i</code> in a for loop. After mapping the <code>ecx-th</code> entry, we increase <code>ecx</code> by one and jump to <code>.map_p2_table</code> again if it&rsquo;s still smaller than 512.</p>
 
 <p>To map a P2 entry we first calculate the start address of its page in <code>eax</code>: The <code>ecx-th</code> entry needs to be mapped to <code>ecx * 2MiB</code>. We use the <code>mul</code> operation for that, which multiplies <code>eax</code> with the given register and stores the result in <code>eax</code>. Then we set the <code>present</code>, <code>writable</code>, and <code>huge page</code> bits and write it to the P2 entry. The address of the <code>ecx-th</code> entry in P2 is <code>p2_table + ecx * 8</code>, because each entry is 8 bytes large.</p>
 

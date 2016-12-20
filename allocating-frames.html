@@ -160,6 +160,7 @@ memory areas:
 
 <p>We used <code>expect</code> in the code above, which will panic if there is no memory map tag. But our current panic handler just loops without printing any error message. Of course we could replace <code>expect</code> by a <code>match</code>, but we should fix the panic handler nonetheless:</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="cp">#[lang = </span><span class="s">&quot;panic_fmt&quot;</span><span class="cp">]</span><span class="w"></span>
+<span class="cp">#[no_mangle]</span><span class="w"></span>
 <span class="k">extern</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">panic_fmt</span><span class="p">()</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;PANIC&quot;</span><span class="p">);</span><span class="w"></span>
 <span class="w">    </span><span class="k">loop</span><span class="p">{}</span><span class="w"></span>
@@ -168,6 +169,7 @@ memory areas:
 
 <p>Now we get a <code>PANIC</code> message. But we can do even better. The <code>panic_fmt</code> function has actually some arguments:</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="cp">#[lang = </span><span class="s">&quot;panic_fmt&quot;</span><span class="cp">]</span><span class="w"></span>
+<span class="cp">#[no_mangle]</span><span class="w"></span>
 <span class="k">extern</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">panic_fmt</span><span class="p">(</span><span class="n">fmt</span><span class="o">:</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">fmt</span><span class="o">::</span><span class="n">Arguments</span><span class="p">,</span><span class="w"> </span><span class="n">file</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="nb">&#39;static</span><span class="w"> </span><span class="kt">str</span><span class="p">,</span><span class="w"></span>
 <span class="w">    </span><span class="n">line</span><span class="o">:</span><span class="w"> </span><span class="kt">u32</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">!</span><span class="w"></span>
 <span class="p">{</span><span class="w"></span>
