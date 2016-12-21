@@ -1019,7 +1019,7 @@ next free frame: Some(Frame { number: 3 })
 
 <p>So to fix our <code>unmap</code> function, we need to remove the cached translation from the TLB. We can use Gerd Zellweger&rsquo;s <a href="https://github.com/gz/rust-x86">x86</a> crate to do this easily. To add it, we append the following to our <code>Cargo.toml</code>:</p>
 <div class="highlight"><pre><code class="language-toml" data-lang="toml"><span></span><span class="p">[</span><span class="n">dependencies</span><span class="p">.</span><span class="n">x86</span><span class="p">]</span>
-<span class="n">version</span> <span class="o">=</span> <span class="s">&quot;0.7.1&quot;</span>
+<span class="n">version</span> <span class="o">=</span> <span class="s">&quot;0.8.0&quot;</span>
 <span class="n">default-features</span> <span class="o">=</span> <span class="kc">false</span>
 </code></pre></div>
 
@@ -1029,7 +1029,7 @@ next free frame: Some(Frame { number: 3 })
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="p">...</span><span class="w"></span>
 <span class="w">  </span><span class="n">p1</span><span class="p">[</span><span class="n">page</span><span class="p">.</span><span class="n">p1_index</span><span class="p">()].</span><span class="n">set_unused</span><span class="p">();</span><span class="w"></span>
 <span class="w">  </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">      </span><span class="o">::</span><span class="n">x86</span><span class="o">::</span><span class="n">tlb</span><span class="o">::</span><span class="n">flush</span><span class="p">(</span><span class="n">page</span><span class="p">.</span><span class="n">start_address</span><span class="p">());</span><span class="w"></span>
+<span class="w">      </span><span class="o">::</span><span class="n">x86</span><span class="o">::</span><span class="n">shared</span><span class="o">::</span><span class="n">tlb</span><span class="o">::</span><span class="n">flush</span><span class="p">(</span><span class="n">page</span><span class="p">.</span><span class="n">start_address</span><span class="p">());</span><span class="w"></span>
 <span class="w">  </span><span class="p">}</span><span class="w"></span>
 <span class="w">  </span><span class="c1">// TODO free p(1,2,3) table if empty</span>
 <span class="w">  </span><span class="c1">//allocator.deallocate_frame(frame);</span>

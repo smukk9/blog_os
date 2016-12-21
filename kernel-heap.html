@@ -99,14 +99,6 @@
 &gt; <span class="nb">cd</span> bump_allocator
 </code></pre></div>
 
-<p>Normally, this subcrate would have its own <code>Cargo.lock</code> and its own <code>target</code> output folder. To avoid this, we can create a so-called <em><a href="http://doc.crates.io/manifest.html#the-workspace-section">workspace</a></em>. For that we only need to add a single line to our <code>Cargo.toml</code>:</p>
-<div class="highlight"><pre><code class="language-toml" data-lang="toml"><span></span><span class="c1"># in Cargo.toml</span>
-
-<span class="p">[</span><span class="n">workspace</span><span class="p">]</span>
-</code></pre></div>
-
-<p>We don&rsquo;t need to add any keys to the <code>workspace</code> section, since they have <a href="https://github.com/rust-lang/rfcs/blob/master/text/1525-cargo-workspace.md#implicit-relations">sensible defaults</a>. Now our <code>bump_allocator</code> subcrate shares the <code>Cargo.toml</code> and <code>target</code> folder of the root project.</p>
-
 <h3 id="implementation">Implementation</h3>
 
 <p>Our allocator is very basic. It only keeps track of the next free address:</p>
