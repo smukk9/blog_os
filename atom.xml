@@ -576,9 +576,9 @@ make: *** [cargo] Error 101
 &lt;pre&gt;&lt;code&gt;cargo install xargo
 &lt;/code&gt;&lt;/pre&gt;
 
-&lt;p&gt;If the installation fails, make sure that you have &lt;code&gt;cmake&lt;/code&gt; and the OpenSSL headers installed. For more details, see the xargo&amp;rsquo;s &lt;a href=&#34;https://github.com/japaric/xargo#dependencies&#34;&gt;dependency section&lt;/a&gt;.&lt;/p&gt;
+&lt;p&gt;Xargo depends on the rust source code, which we can install with &lt;code&gt;rustup component add rust-src&lt;/code&gt;.&lt;/p&gt;
 
-&lt;p&gt;Xargo is “a drop-in replacement for cargo”, so every cargo command also works with &lt;code&gt;xargo&lt;/code&gt;. You can do e.g. &lt;code&gt;xargo --help&lt;/code&gt;, &lt;code&gt;xargo clean&lt;/code&gt;, or &lt;code&gt;xargo doc&lt;/code&gt;. However, the &lt;code&gt;build&lt;/code&gt; command gains additional functionality: &lt;code&gt;xargo build&lt;/code&gt; will automatically cross compile the &lt;code&gt;core&lt;/code&gt; library (and a few other libraries such as &lt;code&gt;alloc&lt;/code&gt; and &lt;code&gt;collections&lt;/code&gt;) when compiling for custom targets.&lt;/p&gt;
+&lt;p&gt;Xargo is “a drop-in replacement for cargo”, so every cargo command also works with &lt;code&gt;xargo&lt;/code&gt;. You can do e.g. &lt;code&gt;xargo --help&lt;/code&gt;, &lt;code&gt;xargo clean&lt;/code&gt;, or &lt;code&gt;xargo doc&lt;/code&gt;. However, the &lt;code&gt;build&lt;/code&gt; command gains additional functionality: &lt;code&gt;xargo build&lt;/code&gt; will automatically cross compile the &lt;code&gt;core&lt;/code&gt; library when compiling for custom targets.&lt;/p&gt;
 
 &lt;p&gt;That&amp;rsquo;s exactly what we want, so we change one letter in our Makefile:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-diff&#34; data-lang=&#34;diff&#34;&gt;&lt;span&gt;&lt;/span&gt;# in `Makefile`
@@ -593,25 +593,12 @@ cargo:
 &lt;p&gt;Now the build goes through &lt;code&gt;xargo&lt;/code&gt;, which should fix the compilation error. Let&amp;rsquo;s try it out:&lt;/p&gt;
 
 &lt;pre&gt;&lt;code&gt;&amp;gt; make run
-Downloading https://static.rust-lang.org/dist/2016-09-19/rustc-nightly-src.tar.gz
-Unpacking rustc-nightly-src.tar.gz
-Compiling sysroot for x86_64-blog_os
-Compiling core v0.0.0
-
+Compiling core v0.0.0 (file:///home/…/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/src/libcore)
 LLVM ERROR: SSE register return with SSE disabled
 error: Could not compile `core`.
 &lt;/code&gt;&lt;/pre&gt;
 
-&lt;p&gt;Well, we get a different error now, so it seems like we&amp;rsquo;re making progress :).&lt;/p&gt;
-
-&lt;p&gt;We see that &lt;code&gt;xargo&lt;/code&gt; downloads the corresponding source code for our Rust nightly from the Rust servers and then compiles a new &lt;em&gt;sysroot&lt;/em&gt; for our new target. A sysroot contains the various pre-compiled crates such as &lt;code&gt;core&lt;/code&gt;, &lt;code&gt;alloc&lt;/code&gt;, and &lt;code&gt;collections&lt;/code&gt;.&lt;/p&gt;
-
-&lt;p&gt;However, a strange error occurs when compiling &lt;code&gt;core&lt;/code&gt;:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code&gt;LLVM ERROR: SSE register return with SSE disabled
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;It seems like there is a “SSE register return” although SSE is disabled. But what&amp;rsquo;s an “SSE register return”?&lt;/p&gt;
+&lt;p&gt;Well, we get a different error now, so it seems like we&amp;rsquo;re making progress :). It seems like there is a “SSE register return” although SSE is disabled. But what&amp;rsquo;s an “SSE register return”?&lt;/p&gt;
 
 &lt;h3 id=&#34;sse-register-return&#34;&gt;SSE Register Return&lt;/h3&gt;
 
@@ -632,39 +619,57 @@ error: Could not compile `core`.
 &lt;p&gt;Let&amp;rsquo;s try &lt;code&gt;make run&lt;/code&gt; again:&lt;/p&gt;
 
 &lt;pre&gt;&lt;code&gt;&amp;gt; make run
-Compiling sysroot for x86_64-blog_os
-Compiling core v0.0.0 (file:///home/…/.xargo/src/libcore)
-Compiling rustc_unicode v0.0.0 (file:///home/…/.xargo/src/librustc_unicode)
-Compiling rand v0.0.0 (file:///home/…/.xargo/src/librand)
-Compiling alloc v0.0.0 (file:///home/…/.xargo/src/liballoc)
-Compiling collections v0.0.0 (file:///home/…/.xargo/src/libcollections)
- Finished release [optimized] target(s) in 40.35 secs
-Compiling once v0.3.2
-Compiling bitflags v0.4.0
-Compiling bit_field v0.1.0
-Compiling x86 v0.7.1
-Compiling linked_list_allocator v0.2.2
-Compiling raw-cpuid v2.0.1
-Compiling spin v0.3.5
-Compiling multiboot2 v0.1.0
-Compiling rlibc v0.1.5
-Compiling spin v0.4.3
-Compiling bitflags v0.7.0
-Compiling lazy_static v0.2.1
-Compiling hole_list_allocator v0.1.0
-Compiling blog_os v0.1.0
-warning: unused result which must be used…
-warning: unused variable: `allocator`…
-warning: unused variable: `frame`…
+   Compiling core v0.0.0 (file:///…/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/src/libcore)
+    Finished release [optimized] target(s) in 21.95 secs
+   Compiling spin v0.4.5
+   Compiling once v0.3.2
+   Compiling x86 v0.8.0
+   Compiling bitflags v0.7.0
+   Compiling raw-cpuid v2.0.1
+   Compiling rlibc v0.1.5
+   Compiling linked_list_allocator v0.2.3
+   Compiling volatile v0.1.0
+   Compiling bitflags v0.4.0
+   Compiling bit_field v0.5.0
+   Compiling spin v0.3.5
+   Compiling multiboot2 v0.1.0
+   Compiling lazy_static v0.2.2
+   Compiling hole_list_allocator v0.1.0 (file:///…/libs/hole_list_allocator)
+   Compiling blog_os v0.1.0 (file:///…)
+error[E0463]: can&#39;t find crate for `alloc`
+  --&amp;gt; src/lib.rs:33:1
+   |
+33 | extern crate alloc;
+   | ^^^^^^^^^^^^^^^^^^^ can&#39;t find crate
 
-  Finished debug [unoptimized + debuginfo] target(s) in 6.62 secs
+error: aborting due to previous error
 &lt;/code&gt;&lt;/pre&gt;
 
-&lt;p&gt;It worked! We see that &lt;code&gt;xargo&lt;/code&gt; now successfully compiles the sysroot crates (including &lt;code&gt;core&lt;/code&gt;) in release mode. Then it starts the normal cargo build, which now succeeds since the required &lt;code&gt;core&lt;/code&gt;, &lt;code&gt;alloc&lt;/code&gt;, and &lt;code&gt;collection&lt;/code&gt; libraries are now available.&lt;/p&gt;
+&lt;p&gt;We see that &lt;code&gt;xargo&lt;/code&gt; now compiles the &lt;code&gt;core&lt;/code&gt; crate in release mode. Then it starts the normal cargo build. Cargo then recompiles all dependencies, since it needs to generate different code for the new target.&lt;/p&gt;
 
-&lt;p&gt;Note that cargo needs to recompile all dependencies too, since it needs to generate different code for the new target. If you&amp;rsquo;re getting an error about a missing &lt;code&gt;compiler-rt&lt;/code&gt; library, try updating to the newest nightly (&lt;code&gt;compiler-rt&lt;/code&gt; was removed in &lt;a href=&#34;https://github.com/rust-lang/rust/pull/35021&#34;&gt;PR #35021&lt;/a&gt;).&lt;/p&gt;
+&lt;p&gt;However, the build still fails. The reason is that xargo only installs &lt;code&gt;core&lt;/code&gt; by default, but we also need the &lt;code&gt;alloc&lt;/code&gt; and &lt;code&gt;collections&lt;/code&gt; crates. We can enable them by creating a file named &lt;code&gt;Xargo.toml&lt;/code&gt; with the following contents:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-toml&#34; data-lang=&#34;toml&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;# Xargo.toml&lt;/span&gt;
 
-&lt;p&gt;Now we have a kernel that never touches the multimedia registers! We can verify this by executing:&lt;/p&gt;
+&lt;span class=&#34;p&#34;&gt;[&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;target&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;.&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;x86_64-blog_os&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;.&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;dependencies&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;]&lt;/span&gt;
+&lt;span class=&#34;n&#34;&gt;collections&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;=&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;{}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Now xargo compiles &lt;code&gt;alloc&lt;/code&gt; and &lt;code&gt;collections&lt;/code&gt;, too:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;&amp;gt; make run
+   Compiling core v0.0.0 (file:///…/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/src/libcore)
+   Compiling std_unicode v0.0.0 (file:///…/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/src/libstd_unicode)
+   Compiling alloc v0.0.0 (file:///…/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/src/liballoc)
+   Compiling collections v0.0.0 (file:///…/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/src/libcollections)
+    Finished release [optimized] target(s) in 28.84 secs
+   Compiling blog_os v0.1.0 (file:///…/Documents/blog_os/master)
+warning: unused variable: `allocator` […]
+warning: unused variable: `frame` […]
+
+    Finished debug [unoptimized + debuginfo] target(s) in 1.75 secs
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;It worked! Now we have a kernel that never touches the multimedia registers! We can verify this by executing:&lt;/p&gt;
 
 &lt;pre&gt;&lt;code&gt;&amp;gt; objdump -d build/kernel-x86_64.bin | grep &amp;quot;mm[0-9]&amp;quot;
 &lt;/code&gt;&lt;/pre&gt;
