@@ -420,7 +420,7 @@
 <span class="p">}</span><span class="w"></span>
 </code></pre></div>
 
-<p>The <code>MemoryController</code> struct holds the three types that are required for <code>alloc_stack</code> and provides a simpler interface (only one argument). The <code>alloc_stack</code> wrapper just takes the tree types as <code>&amp;mut</code> through <a href="http://rust-lang.github.io/book/chXX-patterns.html#Destructuring">destructuring</a> and forwards them to the <code>stack_allocator</code>. The <a href="http://rust-lang.github.io/book/chXX-patterns.html#ref-and-ref-mut">ref mut</a>-s are needed to take the inner fields by mutable reference. Note that we&rsquo;re re-exporting the <code>Stack</code> type since it is returned by <code>alloc_stack</code>.</p>
+<p>The <code>MemoryController</code> struct holds the three types that are required for <code>alloc_stack</code> and provides a simpler interface (only one argument). The <code>alloc_stack</code> wrapper just takes the tree types as <code>&amp;mut</code> through <a href="http://rust-lang.github.io/book/ch18-00-patterns.html#Destructuring">destructuring</a> and forwards them to the <code>stack_allocator</code>. The <a href="http://rust-lang.github.io/book/ch18-00-patterns.html#ref-and-ref-mut">ref mut</a>-s are needed to take the inner fields by mutable reference. Note that we&rsquo;re re-exporting the <code>Stack</code> type since it is returned by <code>alloc_stack</code>.</p>
 
 <p>The last step is to create a <code>StackAllocator</code> and return a <code>MemoryController</code> from <code>memory::init</code>:</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/memory/mod.rs</span>
@@ -581,7 +581,7 @@
 
 <h4 id="loading-the-tss">Loading the TSS</h4>
 
-<p>Now that we created a new TSS, we need a way to tell the CPU that it should use it. Unfortunately, this is a bit cumbersome, since the TSS is a Task State <em>Segment</em> (for historical reasons). So instead of loading the table directly, we need to add a new segment descriptor to the <a href="GDT">Global Descriptor Table</a>. Then we can load our TSS invoking the <a href="http://x86.renejeschke.de/html/file_module_x86_id_163.html"><code>ltr</code> instruction</a> with the respective GDT index.</p>
+<p>Now that we created a new TSS, we need a way to tell the CPU that it should use it. Unfortunately, this is a bit cumbersome, since the TSS is a Task State <em>Segment</em> (for historical reasons). So instead of loading the table directly, we need to add a new segment descriptor to the <a href="http://www.flingos.co.uk/docs/reference/Global-Descriptor-Table/">Global Descriptor Table</a> (GDT). Then we can load our TSS invoking the <a href="http://x86.renejeschke.de/html/file_module_x86_id_163.html"><code>ltr</code> instruction</a> with the respective GDT index.</p>
 
 <h3 id="the-global-descriptor-table-again">The Global Descriptor Table (again)</h3>
 
