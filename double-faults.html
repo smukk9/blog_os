@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  
+  
+
+  <title>
+    Double Faults &middot; Writing an OS in Rust
+  </title>
+
+  <link rel="canonical" href="http://os.phil-opp.com/double-faults.html">
+
+  
+  <link rel="stylesheet" href="/css/poole.css">
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/syntax.css">
+
+  
+  <link rel="apple-touch-icon-precomposed" sizes="144x144" href="/images/apple-touch-icon-precomposed.png">
+  <link rel="shortcut icon" href="/images/favicon.ico">
+
+  
+
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/anchor-js/2.0.0/anchor.min.js"></script>
+  <script src="js/toc.min.js"></script>
+  <script src="js/main.js"></script>
+  <script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-65296949-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+
+  
+  <script type="text/javascript">
+    if (window.location.hostname == "phil-opp.github.io") {
+      window.location.href = "http://os.phil-opp.com/";
+    }
+  </script>
+</head>
+
+<body>
+<div class="container content">
+
+<header class="masthead">
+  <h3 class="masthead-title">
+    <a href="/" title="Home">Writing an OS in Rust</a>
+    <span class="navigation">
+      <small><a href="/atom.xml"><img src="/images/feed-icon.png" alt="RSS"></a></small>
+    </span>
+    <small>Philipp&nbsp;Oppermann's&nbsp;blog</small>
+  </h3>
+</header>
+
+<main>
+
+
+<article class="post">
+  <h1 class="post-title">Double Faults</h1>
+  <time datetime="2017-01-02" class="post-date">
+    Jan 2, 2017
+    
+  </time>
+
+  
+
+<p>In this post we explore double faults in detail. We also set up an <em>Interrupt Stack Table</em> to catch double faults on a separate kernel stack. This way, we can completely prevent triple faults, even on kernel stack overflow.</p>
+
+<aside id="toc"></aside>
+
+<p>As always, the complete source code is available on <a href="https://github.com/phil-opp/blog_os/tree/double_faults">Github</a>. Please file <a href="https://github.com/phil-opp/blog_os/issues">issues</a> for any problems, questions, or improvement suggestions. There is also a <a href="https://gitter.im/phil-opp/blog_os">gitter chat</a> and a <a href="#disqus_thread">comment section</a> at the end of this page.</p>
+
+<h2 id="what-is-a-double-fault">What is a Double Fault?</h2>
+
+<p>In simplified terms, a double fault is a special exception that occurs when the CPU fails to invoke an exception handler. For example, it occurs when a page fault is triggered but there is no page fault handler registered in the <a href="/catching-exceptions.html#the-interrupt-descriptor-table">Interrupt Descriptor Table</a> (IDT). So it&rsquo;s kind of similar to catch-all blocks in programming languages with exceptions, e.g. <code>catch(...)</code> in C++ or <code>catch(Exception e)</code> in Java or C#.</p>
+
+<p>A double fault behaves like a normal exception. It has the vector number <code>8</code> and we can define a normal handler function for it in the IDT. It is really important to provide a double fault handler, because if a double fault is unhandled a fatal <em>triple fault</em> occurs. Triple faults can&rsquo;t be caught and most hardware reacts with a system reset.</p>
+
+<h3 id="triggering-a-double-fault">Triggering a Double Fault</h3>
+
+<p>Let&rsquo;s provoke a double fault by triggering an exception for that we didn&rsquo;t define a handler function:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/lib.rs</span>
+
+<span class="cp">#[no_mangle]</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">rust_main</span><span class="p">(</span><span class="n">multiboot_information_address</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="p">...</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// initialize our IDT</span>
+<span class="w">    </span><span class="n">interrupts</span><span class="o">::</span><span class="n">init</span><span class="p">();</span><span class="w"></span>
+
+<span class="w">    </span><span class="c1">// trigger a debug exception</span>
+<span class="hll"><span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">int</span><span class="o">!</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">};</span><span class="w"></span>
+</span>
+<span class="w">    </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;It did not crash!&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">loop</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>We use the <a href="https://docs.rs/x86/0.8.0/x86/macro.int!.html">int! macro</a> of the <a href="https://github.com/gz/rust-x86">x86 crate</a> to trigger the exception with vector number <code>1</code>, which is the <a href="http://wiki.osdev.org/Exceptions#Debug">debug exception</a>. The debug exception occurs for example when a breakpoint defined in the <a href="https://en.wikipedia.org/wiki/X86_debug_register">debug registers</a> is hit. Like the <a href="http://wiki.osdev.org/Exceptions#Breakpoint">breakpoint exception</a>, it is mainly used for <a href="http://www.ksyash.com/2011/01/210/">implementing debuggers</a>.</p>
+
+<p>We haven&rsquo;t registered a handler function for the debug exception in our <a href="/catching-exceptions.html#the-interrupt-descriptor-table">IDT</a>, so the <code>int!(1)</code> line should cause a double fault in the CPU.</p>
+
+<p>When we start our kernel now, we see that it enters an endless boot loop:</p>
+
+<p><img src="images/boot-loop.gif" alt="boot loop" /></p>
+
+<p>The reason for the boot loop is the following:</p>
+
+<ol>
+<li>The CPU executes the <a href="https://en.wikipedia.org/wiki/INT_(x86_instruction)">int 1</a> instruction, which causes a software-invoked <code>Debug</code> exception.</li>
+<li>The CPU looks at the corresponding entry in the IDT and sees that the present bit isn&rsquo;t set. Thus, it can&rsquo;t call the debug exception handler and a double fault occurs.</li>
+<li>The CPU looks at the IDT entry of the double fault handler, but this entry is also non-present. Thus, a <em>triple</em> fault occurs.</li>
+<li>A triple fault is fatal. QEMU reacts to it like most real hardware and issues a system reset.</li>
+</ol>
+
+<p>So in order to prevent this triple fault, we need to either provide a handler function for debug exceptions or a double fault handler. We will do the latter, since we want to avoid triple faults in all cases.</p>
+
+<h3 id="a-double-fault-handler">A Double Fault Handler</h3>
+
+<p>A double fault is a normal exception with an error code, so we can use our <code>handler_with_error_code</code> macro to create a wrapper function:</p>
+
+<p><div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
+
+<span class="n">lazy_static</span><span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">ref</span><span class="w"> </span><span class="n">IDT</span><span class="o">:</span><span class="w"> </span><span class="n">idt</span><span class="o">::</span><span class="n">Idt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">idt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">idt</span><span class="o">::</span><span class="n">Idt</span><span class="o">::</span><span class="n">new</span><span class="p">();</span><span class="w"></span>
+
+<span class="w">        </span><span class="n">idt</span><span class="p">.</span><span class="n">set_handler</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">handler</span><span class="o">!</span><span class="p">(</span><span class="n">divide_by_zero_handler</span><span class="p">));</span><span class="w"></span>
+<span class="w">        </span><span class="n">idt</span><span class="p">.</span><span class="n">set_handler</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="n">handler</span><span class="o">!</span><span class="p">(</span><span class="k">break</span><span class="n">point_handler</span><span class="p">));</span><span class="w"></span>
+<span class="w">        </span><span class="n">idt</span><span class="p">.</span><span class="n">set_handler</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span><span class="w"> </span><span class="n">handler</span><span class="o">!</span><span class="p">(</span><span class="n">invalid_opcode_handler</span><span class="p">));</span><span class="w"></span>
+<span class="w">        </span><span class="c1">// new double fault handler</span>
+<span class="hll"><span class="w">        </span><span class="n">idt</span><span class="p">.</span><span class="n">set_handler</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">handler_with_error_code</span><span class="o">!</span><span class="p">(</span><span class="n">double_fault_handler</span><span class="p">));</span><span class="w"></span>
+</span><span class="w">        </span><span class="n">idt</span><span class="p">.</span><span class="n">set_handler</span><span class="p">(</span><span class="mi">14</span><span class="p">,</span><span class="w"> </span><span class="n">handler_with_error_code</span><span class="o">!</span><span class="p">(</span><span class="n">page_fault_handler</span><span class="p">));</span><span class="w"></span>
+
+<span class="w">        </span><span class="n">idt</span><span class="w"></span>
+<span class="w">    </span><span class="p">};</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="hll"><span class="c1">// our new double fault handler</span>
+</span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">double_fault_handler</span><span class="p">(</span><span class="n">stack_frame</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="n">ExceptionStackFrame</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="n">_error_code</span><span class="o">:</span><span class="w"> </span><span class="kt">u64</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\n</span><span class="s">EXCEPTION: DOUBLE FAULT</span><span class="se">\n</span><span class="s">{:#?}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">stack_frame</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">loop</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+<!--end_--></p>
+
+<p>Our handler prints a short error message and dumps the exception stack frame. The error code of the double fault handler is always zero, so there&rsquo;s no reason to print it.</p>
+
+<p>When we start our kernel now, we should see that the double fault handler is invoked:</p>
+
+<p><img src="images/qemu-catch-double-fault.png" alt="QEMU printing `EXCEPTION: DOUBLE FAULT` and the exception stack frame" /></p>
+
+<p>It worked! Here is what happens this time:</p>
+
+<ol>
+<li>The CPU executes the <code>int 1</code> instruction macro, which causes a software-invoked <code>Debug</code> exception.</li>
+<li>Like before, the CPU looks at the corresponding entry in the IDT and sees that the present bit isn&rsquo;t set. Thus, it can&rsquo;t call the debug exception handler and a double fault occurs.</li>
+<li>The CPU jumps to the – now present – double fault handler.</li>
+</ol>
+
+<p>The triple fault (and the boot-loop) no longer occurs, since the CPU can now call the double fault handler.</p>
+
+<p>That was quite straightforward! So why do we need a whole post for this topic? Well, we&rsquo;re now able to catch <em>most</em> double faults, but there are some cases where our current approach doesn&rsquo;t suffice.</p>
+
+<h2 id="causes-of-double-faults">Causes of Double Faults</h2>
+
+<p>Before we look at the special cases, we need to know the exact causes of double faults. Above, we used a pretty vague definition:</p>
+
+<blockquote>
+<p>A double fault is a special exception that occurs when the CPU fails to invoke an exception handler.</p>
+</blockquote>
+
+<p>What does <em>“fails to invoke”</em> mean exactly? The handler is not present? The handler is <a href="http://pages.cs.wisc.edu/~remzi/OSTEP/vm-beyondphys.pdf">swapped out</a>? And what happens if a handler causes exceptions itself?</p>
+
+<p>For example, what happens if… :</p>
+
+<ol>
+<li>a divide-by-zero exception occurs, but the corresponding handler function is swapped out?</li>
+<li>a page fault occurs, but the page fault handler is swapped out?</li>
+<li>a divide-by-zero handler causes a breakpoint exception, but the breakpoint handler is swapped out?</li>
+<li>our kernel overflows its stack and the <a href="/remap-the-kernel.html#creating-a-guard-page">guard page</a> is hit?</li>
+</ol>
+
+<p>Fortunately, the AMD64 manual (<a href="http://developer.amd.com/wordpress/media/2012/10/24593_APM_v21.pdf">PDF</a>) has an exact definition (in Section 8.2.9). According to it, a “double fault exception <em>can</em> occur when a second exception occurs during the handling of a prior (first) exception handler”. The <em>“can”</em> is important: Only very specific combinations of exceptions lead to a double fault. These combinations are:</p>
+
+<table>
+<thead>
+<tr>
+<th>First Exception</th>
+<th>Second Exception</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><a href="http://wiki.osdev.org/Exceptions#Divide-by-zero_Error">Divide-by-zero</a>,<br><a href="http://wiki.osdev.org/Exceptions#Invalid_TSS">Invalid TSS</a>,<br><a href="http://wiki.osdev.org/Exceptions#Segment_Not_Present">Segment Not Present</a>,<br><a href="http://wiki.osdev.org/Exceptions#Stack-Segment_Fault">Stack-Segment Fault</a>,<br><a href="http://wiki.osdev.org/Exceptions#General_Protection_Fault">General Protection Fault</a></td>
+<td><a href="http://wiki.osdev.org/Exceptions#Invalid_TSS">Invalid TSS</a>,<br><a href="http://wiki.osdev.org/Exceptions#Segment_Not_Present">Segment Not Present</a>,<br><a href="http://wiki.osdev.org/Exceptions#Stack-Segment_Fault">Stack-Segment Fault</a>,<br><a href="http://wiki.osdev.org/Exceptions#General_Protection_Fault">General Protection Fault</a></td>
+</tr>
+
+<tr>
+<td><a href="http://wiki.osdev.org/Exceptions#Page_Fault">Page Fault</a></td>
+<td><a href="http://wiki.osdev.org/Exceptions#Page_Fault">Page Fault</a>,<br><a href="http://wiki.osdev.org/Exceptions#Invalid_TSS">Invalid TSS</a>,<br><a href="http://wiki.osdev.org/Exceptions#Segment_Not_Present">Segment Not Present</a>,<br><a href="http://wiki.osdev.org/Exceptions#Stack-Segment_Fault">Stack-Segment Fault</a>,<br><a href="http://wiki.osdev.org/Exceptions#General_Protection_Fault">General Protection Fault</a></td>
+</tr>
+</tbody>
+</table>
+
+<p>So for example a divide-by-zero fault followed by a page fault is fine (the page fault handler is invoked), but a divide-by-zero fault followed by a general-protection fault leads to a double fault.</p>
+
+<p>With the help of this table, we can answer the first three of the above questions:</p>
+
+<ol>
+<li>If a divide-by-zero exception occurs and the corresponding handler function is swapped out, a <em>page fault</em> occurs and the <em>page fault handler</em> is invoked.</li>
+<li>If a page fault occurs and the page fault handler is swapped out, a <em>double fault</em> occurs and the <em>double fault handler</em> is invoked.</li>
+<li>If a divide-by-zero handler causes a breakpoint exception, the CPU tries to invoke the breakpoint handler. If the breakpoint handler is swapped out, a <em>page fault</em> occurs and the <em>page fault handler</em> is invoked.</li>
+</ol>
+
+<p>In fact, even the case of a non-present handler follows this scheme: A non-present handler causes a <em>segment-not-present</em> exception. We didn&rsquo;t define a segment-not-present handler, so another segment-not-present exception occurs. According to the table, this leads to a double fault.</p>
+
+<h3 id="kernel-stack-overflow">Kernel Stack Overflow</h3>
+
+<p>Let&rsquo;s look at the fourth question:</p>
+
+<blockquote>
+<p>What happens if our kernel overflows its stack and the <a href="/remap-the-kernel.html#creating-a-guard-page">guard page</a> is hit?</p>
+</blockquote>
+
+<p>When our kernel overflows its stack and hits the guard page, a <em>page fault</em> occurs. The CPU looks up the page fault handler in the IDT and tries to push the <a href="http://os.phil-opp.com/better-exception-messages.html#exceptions-in-detail">exception stack frame</a> onto the stack. However, our current stack pointer still points to the non-present guard page. Thus, a second page fault occurs, which causes a double fault (according to the above table).</p>
+
+<p>So the CPU tries to call our <em>double fault handler</em> now. However, on a double fault the CPU tries to push the exception stack frame, too. Our stack pointer still points to the guard page, so a <em>third</em> page fault occurs, which causes a <em>triple fault</em> and a system reboot. So our current double fault handler can&rsquo;t avoid a triple fault in this case.</p>
+
+<p>Let&rsquo;s try it ourselves! We can easily provoke a kernel stack overflow by calling a function that recurses endlessly:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/lib.rs</span>
+
+<span class="cp">#[no_mangle]</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">rust_main</span><span class="p">(</span><span class="n">multiboot_information_address</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="p">...</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// initialize our IDT</span>
+<span class="w">    </span><span class="n">interrupts</span><span class="o">::</span><span class="n">init</span><span class="p">();</span><span class="w"></span>
+
+<span class="hll"><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="n">stack_overflow</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+</span><span class="hll"><span class="w">        </span><span class="n">stack_overflow</span><span class="p">();</span><span class="w"> </span><span class="c1">// for each recursion, the return address is pushed</span>
+</span><span class="hll"><span class="w">    </span><span class="p">}</span><span class="w"></span>
+</span>
+<span class="w">    </span><span class="c1">// trigger a stack overflow</span>
+<span class="hll"><span class="w">    </span><span class="n">stack_overflow</span><span class="p">();</span><span class="w"></span>
+</span>
+<span class="w">    </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;It did not crash!&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">loop</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>When we try this code in QEMU, we see that the system enters a boot-loop again.</p>
+
+<p>So how can we avoid this problem? We can&rsquo;t omit the pushing of the exception stack frame, since the CPU itself does it. So we need to ensure somehow that the stack is always valid when a double fault exception occurs. Fortunately, the x86_64 architecture has a solution to this problem.</p>
+
+<h2 id="switching-stacks">Switching Stacks</h2>
+
+<p>The x86_64 architecture is able to switch to a predefined, known-good stack when an exception occurs. This switch happens at hardware level, so it can be performed before the CPU pushes the exception stack frame.</p>
+
+<p>This switching mechanism is implemented as an <em>Interrupt Stack Table</em> (IST). The IST is a table of 7 pointers to known-good stacks. In Rust-like pseudo code:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="k">struct</span><span class="w"> </span><span class="n">InterruptStackTable</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">stack_pointers</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">StackPointer</span><span class="o">&gt;</span><span class="p">;</span><span class="w"> </span><span class="mi">7</span><span class="p">],</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>For each exception handler, we can choose an stack from the IST through the <code>options</code> field in the corresponding <a href="/catching-exceptions.html#the-interrupt-descriptor-table">IDT entry</a>. For example, we could use the first stack in the IST for our double fault handler. Then the CPU would automatically switch to this stack whenever a double fault occurs. This switch would happen before anything is pushed, so it would prevent the triple fault.</p>
+
+<h3 id="allocating-a-new-stack">Allocating a new Stack</h3>
+
+<p>In order to fill an Interrupt Stack Table later, we need a way to allocate new stacks. Therefore we extend our <code>memory</code> module with a new <code>stack_allocator</code> submodule:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/memory/mod.rs</span>
+
+<span class="kn">mod</span><span class="w"> </span><span class="n">stack_allocator</span><span class="p">;</span><span class="w"></span>
+</code></pre></div>
+
+<p>First, we create a new <code>StackAllocator</code> struct and a constructor function:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/memory/stack_allocator.rs</span>
+
+<span class="kn">use</span><span class="w"> </span><span class="n">memory</span><span class="o">::</span><span class="n">paging</span><span class="o">::</span><span class="n">PageIter</span><span class="p">;</span><span class="w"></span>
+
+<span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="n">StackAllocator</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">range</span><span class="o">:</span><span class="w"> </span><span class="n">PageIter</span><span class="p">,</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">StackAllocator</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">new</span><span class="p">(</span><span class="n">page_range</span><span class="o">:</span><span class="w"> </span><span class="n">PageIter</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">StackAllocator</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">StackAllocator</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">range</span><span class="o">:</span><span class="w"> </span><span class="n">page_range</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>We create a simple <code>StackAllocator</code> that allocates stacks from a given range of pages (<code>PageIter</code> is an Iterator over a range of pages; we introduced it <a href="/kernel-heap.html#mapping-the-heap">in the kernel heap post</a>.).</p>
+
+<p>We add a <code>alloc_stack</code> method that allocates a new stack:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/memory/stack_allocator.rs</span>
+
+<span class="kn">use</span><span class="w"> </span><span class="n">memory</span><span class="o">::</span><span class="n">paging</span><span class="o">::</span><span class="p">{</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">Page</span><span class="p">,</span><span class="w"> </span><span class="n">ActivePageTable</span><span class="p">};</span><span class="w"></span>
+<span class="kn">use</span><span class="w"> </span><span class="n">memory</span><span class="o">::</span><span class="p">{</span><span class="n">PAGE_SIZE</span><span class="p">,</span><span class="w"> </span><span class="n">FrameAllocator</span><span class="p">};</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">StackAllocator</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">alloc_stack</span><span class="o">&lt;</span><span class="n">FA</span><span class="o">:</span><span class="w"> </span><span class="n">FrameAllocator</span><span class="o">&gt;</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                           </span><span class="n">active_table</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">ActivePageTable</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                           </span><span class="n">frame_allocator</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">FA</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                           </span><span class="n">size_in_pages</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"></span>
+<span class="w">                                           </span><span class="o">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">Stack</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">size_in_pages</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="nb">None</span><span class="p">;</span><span class="w"> </span><span class="cm">/* a zero sized stack makes no sense */</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+
+<span class="w">        </span><span class="c1">// clone the range, since we only want to change it on success</span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">range</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">range</span><span class="p">.</span><span class="n">clone</span><span class="p">();</span><span class="w"></span>
+
+<span class="w">        </span><span class="c1">// try to allocate the stack pages and a guard page</span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">guard_page</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">range</span><span class="p">.</span><span class="n">next</span><span class="p">();</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">stack_start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">range</span><span class="p">.</span><span class="n">next</span><span class="p">();</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">stack_end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">size_in_pages</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="n">stack_start</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="c1">// choose the (size_in_pages-2)th element, since index</span>
+<span class="w">            </span><span class="c1">// starts at 0 and we already allocated the start page</span>
+<span class="w">            </span><span class="n">range</span><span class="p">.</span><span class="n">nth</span><span class="p">(</span><span class="n">size_in_pages</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">2</span><span class="p">)</span><span class="w"></span>
+<span class="w">        </span><span class="p">};</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">match</span><span class="w"> </span><span class="p">(</span><span class="n">guard_page</span><span class="p">,</span><span class="w"> </span><span class="n">stack_start</span><span class="p">,</span><span class="w"> </span><span class="n">stack_end</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="p">(</span><span class="nb">Some</span><span class="p">(</span><span class="n">_</span><span class="p">),</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">start</span><span class="p">),</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">end</span><span class="p">))</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="c1">// success! write back updated range</span>
+<span class="w">                </span><span class="bp">self</span><span class="p">.</span><span class="n">range</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">range</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">                </span><span class="c1">// map stack pages to physical frames</span>
+<span class="w">                </span><span class="k">for</span><span class="w"> </span><span class="n">page</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">Page</span><span class="o">::</span><span class="n">range_inclusive</span><span class="p">(</span><span class="n">start</span><span class="p">,</span><span class="w"> </span><span class="n">end</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                    </span><span class="n">active_table</span><span class="p">.</span><span class="n">map</span><span class="p">(</span><span class="n">page</span><span class="p">,</span><span class="w"> </span><span class="n">paging</span><span class="o">::</span><span class="n">WRITABLE</span><span class="p">,</span><span class="w"> </span><span class="n">frame_allocator</span><span class="p">);</span><span class="w"></span>
+<span class="w">                </span><span class="p">}</span><span class="w"></span>
+
+<span class="w">                </span><span class="c1">// create a new stack</span>
+<span class="w">                </span><span class="kd">let</span><span class="w"> </span><span class="n">top_of_stack</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">end</span><span class="p">.</span><span class="n">start_address</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">PAGE_SIZE</span><span class="p">;</span><span class="w"></span>
+<span class="w">                </span><span class="nb">Some</span><span class="p">(</span><span class="n">Stack</span><span class="o">::</span><span class="n">new</span><span class="p">(</span><span class="n">top_of_stack</span><span class="p">,</span><span class="w"> </span><span class="n">start</span><span class="p">.</span><span class="n">start_address</span><span class="p">()))</span><span class="w"></span>
+<span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="w">            </span><span class="n">_</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="nb">None</span><span class="p">,</span><span class="w"> </span><span class="cm">/* not enough pages */</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>The method takes mutable references to the <a href="/modifying-page-tables.html#page-table-ownership">ActivePageTable</a> and a <a href="/allocating-frames.html#a-frame-allocator">FrameAllocator</a>, since it needs to map the new virtual stack pages to physical frames. We define that the stack size is a multiple of the page size.</p>
+
+<p>Instead of operating directly on <code>self.range</code>, we <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone">clone</a> it and only write it back on success. This way, subsequent stack allocations can still succeed if there are pages left (e.g., a call with <code>size_in_pages = 3</code> can still succeed after a failed call with <code>size_in_pages = 100</code>).</p>
+
+<p>In order to be able to clone <code>PageIter</code>, we add a <code>#[derive(Clone)]</code> to its definition in <code>src/memory/paging/mod.rs</code>. We also need to make the <code>start_address</code> method of the <code>Page</code> type public (in the same file).</p>
+
+<p>The actual allocation is straightforward: First, we choose the next page as <a href="/remap-the-kernel.html#creating-a-guard-page">guard page</a>. Then we choose the next <code>size_in_pages</code> pages as stack pages using <a href="https://doc.rust-lang.org/nightly/core/iter/trait.Iterator.html#method.nth">Iterator::nth</a>. If all three variables are <code>Some</code>, the allocation succeeded and we map the stack pages to physical frames using <a href="/modifying-page-tables.html#more-mapping-functions">ActivePageTable::map</a>. The guard page remains unmapped.</p>
+
+<p>Finally, we create and return a new <code>Stack</code>, which we define as follows:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/memory/stack_allocator.rs</span>
+
+<span class="cp">#[derive(Debug)]</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="n">Stack</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">top</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="n">bottom</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">,</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">Stack</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="n">new</span><span class="p">(</span><span class="n">top</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">bottom</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">Stack</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">assert</span><span class="o">!</span><span class="p">(</span><span class="n">top</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">bottom</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">Stack</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="n">top</span><span class="o">:</span><span class="w"> </span><span class="n">top</span><span class="p">,</span><span class="w"></span>
+<span class="w">            </span><span class="n">bottom</span><span class="o">:</span><span class="w"> </span><span class="n">bottom</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">top</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="kt">usize</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="bp">self</span><span class="p">.</span><span class="n">top</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">bottom</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="kt">usize</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="bp">self</span><span class="p">.</span><span class="n">bottom</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>The <code>Stack</code> struct describes a stack though its top and bottom addresses.</p>
+
+<h4 id="the-memory-controller">The Memory Controller</h4>
+
+<p>Now we&rsquo;re able to allocate a new double fault stack. However, we add one more level of abstraction to make things easier. For that we add a new <code>MemoryController</code> type to our <code>memory</code> module:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/memory/mod.rs</span>
+
+<span class="k">pub</span><span class="w"> </span><span class="kn">use</span><span class="w"> </span><span class="bp">self</span><span class="o">::</span><span class="n">stack_allocator</span><span class="o">::</span><span class="n">Stack</span><span class="p">;</span><span class="w"></span>
+
+<span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="n">MemoryController</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">active_table</span><span class="o">:</span><span class="w"> </span><span class="n">paging</span><span class="o">::</span><span class="n">ActivePageTable</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="n">frame_allocator</span><span class="o">:</span><span class="w"> </span><span class="n">AreaFrameAllocator</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="n">stack_allocator</span><span class="o">:</span><span class="w"> </span><span class="n">stack_allocator</span><span class="o">::</span><span class="n">StackAllocator</span><span class="p">,</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">MemoryController</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">alloc_stack</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">size_in_pages</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">Stack</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">MemoryController</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">ref</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">active_table</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                    </span><span class="k">ref</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">frame_allocator</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                    </span><span class="k">ref</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">stack_allocator</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="n">stack_allocator</span><span class="p">.</span><span class="n">alloc_stack</span><span class="p">(</span><span class="n">active_table</span><span class="p">,</span><span class="w"> </span><span class="n">frame_allocator</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                    </span><span class="n">size_in_pages</span><span class="p">)</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>The <code>MemoryController</code> struct holds the three types that are required for <code>alloc_stack</code> and provides a simpler interface (only one argument). The <code>alloc_stack</code> wrapper just takes the tree types as <code>&amp;mut</code> through <a href="http://rust-lang.github.io/book/chXX-patterns.html#Destructuring">destructuring</a> and forwards them to the <code>stack_allocator</code>. The <a href="http://rust-lang.github.io/book/chXX-patterns.html#ref-and-ref-mut">ref mut</a>-s are needed to take the inner fields by mutable reference. Note that we&rsquo;re re-exporting the <code>Stack</code> type since it is returned by <code>alloc_stack</code>.</p>
+
+<p>The last step is to create a <code>StackAllocator</code> and return a <code>MemoryController</code> from <code>memory::init</code>:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/memory/mod.rs</span>
+
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">init</span><span class="p">(</span><span class="n">boot_info</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="n">BootInformation</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">MemoryController</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="p">...</span><span class="w"></span>
+
+<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">stack_allocator</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">stack_alloc_start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">heap_end_page</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">stack_alloc_end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">stack_alloc_start</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">100</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">stack_alloc_range</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Page</span><span class="o">::</span><span class="n">range_inclusive</span><span class="p">(</span><span class="n">stack_alloc_start</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                                      </span><span class="n">stack_alloc_end</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">stack_allocator</span><span class="o">::</span><span class="n">StackAllocator</span><span class="o">::</span><span class="n">new</span><span class="p">(</span><span class="n">stack_alloc_range</span><span class="p">)</span><span class="w"></span>
+<span class="w">    </span><span class="p">};</span><span class="w"></span>
+
+<span class="w">    </span><span class="n">MemoryController</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">active_table</span><span class="o">:</span><span class="w"> </span><span class="n">active_table</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="n">frame_allocator</span><span class="o">:</span><span class="w"> </span><span class="n">frame_allocator</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="n">stack_allocator</span><span class="o">:</span><span class="w"> </span><span class="n">stack_allocator</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>We create a new <code>StackAllocator</code> with a range of 100 pages starting right after the last heap page.</p>
+
+<p>In order to do arithmetic on pages (e.g. calculate the hundredth page after <code>stack_alloc_start</code>), we implement <code>Add&lt;usize&gt;</code> for <code>Page</code>:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/memory/paging/mod.rs</span>
+
+<span class="kn">use</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">ops</span><span class="o">::</span><span class="n">Add</span><span class="p">;</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">Add</span><span class="o">&lt;</span><span class="kt">usize</span><span class="o">&gt;</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">Page</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">type</span><span class="w"> </span><span class="n">Output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Page</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="n">add</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">rhs</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">Page</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">Page</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">number</span><span class="o">:</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">number</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">rhs</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<h4 id="allocating-a-double-fault-stack">Allocating a Double Fault Stack</h4>
+
+<p>Now we can allocate a new double fault stack by passing the memory controller to our <code>interrupts::init</code> function:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/lib.rs</span>
+
+<span class="cp">#[no_mangle]</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">rust_main</span><span class="p">(</span><span class="n">multiboot_information_address</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="p">...</span><span class="w"></span>
+
+<span class="w">    </span><span class="c1">// set up guard page and map the heap pages</span>
+<span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">memory_controller</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memory</span><span class="o">::</span><span class="n">init</span><span class="p">(</span><span class="n">boot_info</span><span class="p">);</span><span class="w"> </span><span class="c1">// new return type</span>
+</span>
+<span class="w">    </span><span class="c1">// initialize our IDT</span>
+<span class="hll"><span class="w">    </span><span class="n">interrupts</span><span class="o">::</span><span class="n">init</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">memory_controller</span><span class="p">);</span><span class="w"> </span><span class="c1">// new argument</span>
+</span><span class="hll">
+</span><span class="w">    </span><span class="p">...</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+
+<span class="c1">// in src/interrupts/mod.rs</span>
+
+<span class="kn">use</span><span class="w"> </span><span class="n">memory</span><span class="o">::</span><span class="n">MemoryController</span><span class="p">;</span><span class="w"></span>
+
+<span class="hll"><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">init</span><span class="p">(</span><span class="n">memory_controller</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">MemoryController</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">double_fault_stack</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memory_controller</span><span class="p">.</span><span class="n">alloc_stack</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"></span>
+</span><span class="hll"><span class="w">        </span><span class="p">.</span><span class="n">expect</span><span class="p">(</span><span class="s">&quot;could not allocate double fault stack&quot;</span><span class="p">);</span><span class="w"></span>
+</span>
+<span class="w">    </span><span class="n">IDT</span><span class="p">.</span><span class="n">load</span><span class="p">();</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>We allocate a 4096 bytes stack (one page) for our double fault handler. Now we just need some way to tell the CPU that it should use this stack for handling double faults.</p>
+
+<h3 id="the-ist-and-tss">The IST and TSS</h3>
+
+<p>The Interrupt Stack Table (IST) is part of an old legacy structure called <em><a href="https://en.wikipedia.org/wiki/Task_state_segment">Task State Segment</a></em> (TSS). The TSS used to hold various information (e.g. processor register state) about a task in 32-bit mode and was for example used for <a href="http://wiki.osdev.org/Context_Switching#Hardware_Context_Switching">hardware context switching</a>. However, hardware context switching is no longer supported in 64-bit mode and the format of the TSS changed completely.</p>
+
+<p>On x86_64, the TSS no longer holds any task specific information at all. Instead, it holds two stack tables (the IST is one of them). The only common field between the 32-bit and 64-bit TSS is the pointer to the <a href="https://en.wikipedia.org/wiki/Task_state_segment#I.2FO_port_permissions">I/O port permissions bitmap</a>.</p>
+
+<p>The 64-bit TSS has the following format:</p>
+
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td><span style="opacity: 0.5">(reserved)</span></td>
+<td><code>u32</code></td>
+</tr>
+
+<tr>
+<td>Privilege Stack Table</td>
+<td><code>[u64; 3]</code></td>
+</tr>
+
+<tr>
+<td><span style="opacity: 0.5">(reserved)</span></td>
+<td><code>u64</code></td>
+</tr>
+
+<tr>
+<td>Interrupt Stack Table</td>
+<td><code>[u64; 7]</code></td>
+</tr>
+
+<tr>
+<td><span style="opacity: 0.5">(reserved)</span></td>
+<td><code>u64</code></td>
+</tr>
+
+<tr>
+<td><span style="opacity: 0.5">(reserved)</span></td>
+<td><code>u16</code></td>
+</tr>
+
+<tr>
+<td>I/O Map Base Address</td>
+<td><code>u16</code></td>
+</tr>
+</tbody>
+</table>
+
+<p>The <em>Privilege Stack Table</em> is used by the CPU when the privilege level changes. For example, if an exception occurs while the CPU is in user mode (privilege level 3), the CPU normally switches to kernel mode (privilege level 0) before invoking the exception handler. In that case, the CPU would switch to the 0th stack in the Privilege Stack Table (since 0 is the target privilege level). We don&rsquo;t have any user mode programs yet, so we ignore this table for now.</p>
+
+<h4 id="creating-a-tss">Creating a TSS</h4>
+
+<p>Let&rsquo;s create a new TSS that contains our double fault stack in its interrupt stack table. For that we need a TSS struct. Fortunately, the <code>x86</code> crate already contains a <a href="https://docs.rs/x86/0.8.0/x86/bits64/task/struct.TaskStateSegment.html"><code>TaskStateSegment</code> struct</a> that we can use:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
+
+<span class="kn">use</span><span class="w"> </span><span class="n">x86</span><span class="o">::</span><span class="n">bits64</span><span class="o">::</span><span class="n">task</span><span class="o">::</span><span class="n">TaskStateSegment</span><span class="p">;</span><span class="w"></span>
+</code></pre></div>
+
+<p>Let&rsquo;s create a new TSS in our <code>interrupts::init</code> function:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
+
+<span class="hll"><span class="kr">const</span><span class="w"> </span><span class="n">DOUBLE_FAULT_IST_INDEX</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">init</span><span class="p">(</span><span class="n">memory_controller</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">MemoryController</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">double_fault_stack</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memory_controller</span><span class="p">.</span><span class="n">alloc_stack</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"></span>
+<span class="w">        </span><span class="p">.</span><span class="n">expect</span><span class="p">(</span><span class="s">&quot;could not allocate double fault stack&quot;</span><span class="p">);</span><span class="w"></span>
+
+<span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">tss</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskStateSegment</span><span class="o">::</span><span class="n">new</span><span class="p">();</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="n">tss</span><span class="p">.</span><span class="n">ist</span><span class="p">[</span><span class="n">DOUBLE_FAULT_IST_INDEX</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">double_fault_stack</span><span class="p">.</span><span class="n">top</span><span class="p">()</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">u64</span><span class="p">;</span><span class="w"></span>
+</span>
+<span class="w">    </span><span class="n">IDT</span><span class="p">.</span><span class="n">load</span><span class="p">();</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>We define that the 0th IST entry is the double fault stack (any other IST index would work too). We create a new TSS through the <code>TaskStateSegment::new</code> function and load the top address (stacks grow downwards) of the double fault stack into the 0th entry.</p>
+
+<h4 id="loading-the-tss">Loading the TSS</h4>
+
+<p>Now that we created a new TSS, we need a way to tell the CPU that it should use it. Unfortunately, this is a bit cumbersome, since the TSS is a Task State <em>Segment</em> (for historical reasons). So instead of loading the table directly, we need to add a new segment descriptor to the <a href="GDT">Global Descriptor Table</a>. Then we can load our TSS invoking the <a href="http://x86.renejeschke.de/html/file_module_x86_id_163.html"><code>ltr</code> instruction</a> with the respective GDT index.</p>
+
+<h3 id="the-global-descriptor-table-again">The Global Descriptor Table (again)</h3>
+
+<p>The Global Descriptor Table (GDT) is a relict that was used for <a href="https://en.wikipedia.org/wiki/X86_memory_segmentation">memory segmentation</a> before paging became the de facto standard. It is still needed in 64-bit mode for various things such as kernel/user mode configuration or TSS loading.</p>
+
+<p>We already created a GDT <a href="/entering-longmode.html#the-global-descriptor-table">when switching to long mode</a>. Back then, we used assembly to create valid code and data segment descriptors, which were required to enter 64-bit mode. We could just edit that assembly file and add an additional TSS descriptor. However, we now have the expressiveness of Rust, so let&rsquo;s do it in Rust instead.</p>
+
+<p>We start by creating a new <code>interrupts::gdt</code> submodule:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
+
+<span class="kn">mod</span><span class="w"> </span><span class="n">gdt</span><span class="p">;</span><span class="w"></span>
+</code></pre></div>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// src/interrupts/gdt.rs</span>
+
+<span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="n">Gdt</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">table</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="kt">u64</span><span class="p">;</span><span class="w"> </span><span class="mi">8</span><span class="p">],</span><span class="w"></span>
+<span class="w">    </span><span class="n">next_free</span><span class="o">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">,</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">Gdt</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">new</span><span class="p">()</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">Gdt</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">Gdt</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="n">table</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="mi">8</span><span class="p">],</span><span class="w"></span>
+<span class="w">            </span><span class="n">next_free</span><span class="o">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>We create a simple <code>Gdt</code> struct with two fields. The <code>table</code> field contains the actual GDT modeled as a <code>[u64; 8]</code>. Theoretically, a GDT can have up to 8192 entries, but this doesn&rsquo;t make much sense in 64-bit mode (since there is no real segmentation support). Eight entries should be more than enough for our system.</p>
+
+<p>The <code>next_free</code> field stores the index of the next free entry. We initialize it with <code>1</code> since the 0th entry needs always needs to be 0 in a valid GDT.</p>
+
+<h4 id="user-and-system-segments">User and System Segments</h4>
+
+<p>There are two types of GDT entries in long mode: user and system segment descriptors. Descriptors for code and data segment segments are user segment descriptors. They contain no addresses since segments always span the complete address space on x86_64 (real segmentation is no longer supported). Thus, user segment descriptors only contain a few flags (e.g. present or user mode) and fit into a single <code>u64</code> entry.</p>
+
+<p>System descriptors such as TSS descriptors are different. They often contain a base address and a limit (e.g. TSS start and length) and thus need more than 64 bits. Therefore, system segments are 128 bits. They are stored as two consecutive entries in the GDT.</p>
+
+<p>Consequently, we model a <code>Descriptor</code> as an <code>enum</code>:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/gdt.rs</span>
+
+<span class="k">pub</span><span class="w"> </span><span class="k">enum</span><span class="w"> </span><span class="n">Descriptor</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">UserSegment</span><span class="p">(</span><span class="kt">u64</span><span class="p">),</span><span class="w"></span>
+<span class="w">    </span><span class="n">SystemSegment</span><span class="p">(</span><span class="kt">u64</span><span class="p">,</span><span class="w"> </span><span class="kt">u64</span><span class="p">),</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>The flag bits are common between all descriptor types, so we create a general <code>DescriptorFlags</code> type (using the <a href="https://doc.rust-lang.org/bitflags/bitflags/macro.bitflags.html">bitflags</a> macro):</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/gdt.rs</span>
+
+<span class="n">bitflags</span><span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">flags</span><span class="w"> </span><span class="n">DescriptorFlags</span><span class="o">:</span><span class="w"> </span><span class="kt">u64</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kr">const</span><span class="w"> </span><span class="n">CONFORMING</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">42</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="kr">const</span><span class="w"> </span><span class="n">EXECUTABLE</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">43</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="kr">const</span><span class="w"> </span><span class="n">USER_SEGMENT</span><span class="w">      </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">44</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="kr">const</span><span class="w"> </span><span class="n">PRESENT</span><span class="w">           </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">47</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="kr">const</span><span class="w"> </span><span class="n">LONG_MODE</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">53</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>We only add flags that are relevant in 64-bit mode. For example, we omit the read/write bit, since it is completely ignored by the CPU in 64-bit mode.</p>
+
+<h4 id="code-segments">Code Segments</h4>
+
+<p>We add a function to create kernel mode code segments:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/gdt.rs</span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">Descriptor</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">kernel_code_segment</span><span class="p">()</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">Descriptor</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">flags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">USER_SEGMENT</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">PRESENT</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">EXECUTABLE</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">LONG_MODE</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="n">Descriptor</span><span class="o">::</span><span class="n">UserSegment</span><span class="p">(</span><span class="n">flags</span><span class="p">.</span><span class="n">bits</span><span class="p">())</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>We set the <code>USER_SEGMENT</code> bit to indicate a 64 bit user segment descriptor (otherwise the CPU expects a 128 bit system segment descriptor). The <code>PRESENT</code>, <code>EXECUTABLE</code>, and <code>LONG_MODE</code> bits are also needed for a 64-bit mode code segment.</p>
+
+<p>The data segment registers <code>ds</code>, <code>ss</code>, and <code>es</code> are completely ignored in 64-bit mode, so we don&rsquo;t need any data segment descriptors in our GDT.</p>
+
+<h4 id="tss-segments">TSS Segments</h4>
+
+<p>A TSS descriptor is a system segment descriptor with the following format:</p>
+
+<table>
+<thead>
+<tr>
+<th>Bit(s)</th>
+<th>Name</th>
+<th>Meaning</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>0-15</td>
+<td><strong>limit 0-15</strong></td>
+<td>the first 2 byte of the TSS&rsquo;s limit</td>
+</tr>
+
+<tr>
+<td>16-39</td>
+<td><strong>base 0-23</strong></td>
+<td>the first 3 byte of the TSS&rsquo;s base address</td>
+</tr>
+
+<tr>
+<td>40-43</td>
+<td><strong>type</strong></td>
+<td>must be <code>0b1001</code> for an available 64-bit TSS</td>
+</tr>
+
+<tr>
+<td>44</td>
+<td>zero</td>
+<td>must be 0</td>
+</tr>
+
+<tr>
+<td>45-46</td>
+<td>privilege</td>
+<td>the <a href="http://wiki.osdev.org/Security#Rings">ring level</a>: 0 for kernel, 3 for user</td>
+</tr>
+
+<tr>
+<td>47</td>
+<td><strong>present</strong></td>
+<td>must be 1 for valid selectors</td>
+</tr>
+
+<tr>
+<td>48-51</td>
+<td>limit 16-19</td>
+<td>bits 16 to 19 of the segment&rsquo;s limit</td>
+</tr>
+
+<tr>
+<td>52</td>
+<td>available</td>
+<td>freely available to the OS</td>
+</tr>
+
+<tr>
+<td>53-54</td>
+<td>ignored</td>
+<td></td>
+</tr>
+
+<tr>
+<td>55</td>
+<td>granularity</td>
+<td>if it&rsquo;s set, the limit is the number of pages, else it&rsquo;s a byte number</td>
+</tr>
+
+<tr>
+<td>56-63</td>
+<td><strong>base 24-31</strong></td>
+<td>the fourth byte of the base address</td>
+</tr>
+
+<tr>
+<td>64-95</td>
+<td><strong>base 32-63</strong></td>
+<td>the last four bytes of the base address</td>
+</tr>
+
+<tr>
+<td>96-127</td>
+<td>ignored/must be zero</td>
+<td>bits 104-108 must be zero, the rest is ignored</td>
+</tr>
+</tbody>
+</table>
+
+<p>We only need the bold fields for our TSS descriptor. For example, we don&rsquo;t need the <code>limit 16-19</code> field since a TSS has a fixed size that is smaller than <code>2^16</code>.</p>
+
+<p>Let&rsquo;s add a function to our descriptor that creates a TSS descriptor for a given TSS:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/gdt.rs</span>
+
+<span class="kn">use</span><span class="w"> </span><span class="n">x86</span><span class="o">::</span><span class="n">bits64</span><span class="o">::</span><span class="n">task</span><span class="o">::</span><span class="n">TaskStateSegment</span><span class="p">;</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">Descriptor</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">tss_segment</span><span class="p">(</span><span class="n">tss</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="nb">&#39;static</span><span class="w"> </span><span class="n">TaskStateSegment</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">Descriptor</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kn">use</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">mem</span><span class="o">::</span><span class="n">size_of</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="kn">use</span><span class="w"> </span><span class="n">bit_field</span><span class="o">::</span><span class="n">BitField</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tss</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="o">*</span><span class="kr">const</span><span class="w"> </span><span class="n">_</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">u64</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">low</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">PRESENT</span><span class="p">.</span><span class="n">bits</span><span class="p">();</span><span class="w"></span>
+<span class="w">        </span><span class="c1">// base</span>
+<span class="w">        </span><span class="n">low</span><span class="p">.</span><span class="n">set_range</span><span class="p">(</span><span class="mi">16</span><span class="p">..</span><span class="mi">40</span><span class="p">,</span><span class="w"> </span><span class="n">ptr</span><span class="p">.</span><span class="n">get_range</span><span class="p">(</span><span class="mi">0</span><span class="p">..</span><span class="mi">24</span><span class="p">));</span><span class="w"></span>
+<span class="w">        </span><span class="n">low</span><span class="p">.</span><span class="n">set_range</span><span class="p">(</span><span class="mi">56</span><span class="p">..</span><span class="mi">64</span><span class="p">,</span><span class="w"> </span><span class="n">ptr</span><span class="p">.</span><span class="n">get_range</span><span class="p">(</span><span class="mi">24</span><span class="p">..</span><span class="mi">32</span><span class="p">));</span><span class="w"></span>
+<span class="w">        </span><span class="c1">// limit (the `-1` in needed since the bound is inclusive)</span>
+<span class="w">        </span><span class="n">low</span><span class="p">.</span><span class="n">set_range</span><span class="p">(</span><span class="mi">0</span><span class="p">..</span><span class="mi">16</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="n">size_of</span><span class="o">::&lt;</span><span class="n">TaskStateSegment</span><span class="o">&gt;</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">u64</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="c1">// type (0b1001 = available 64-bit tss)</span>
+<span class="w">        </span><span class="n">low</span><span class="p">.</span><span class="n">set_range</span><span class="p">(</span><span class="mi">40</span><span class="p">..</span><span class="mi">44</span><span class="p">,</span><span class="w"> </span><span class="mb">0b1001</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">high</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="n">high</span><span class="p">.</span><span class="n">set_range</span><span class="p">(</span><span class="mi">0</span><span class="p">..</span><span class="mi">32</span><span class="p">,</span><span class="w"> </span><span class="n">ptr</span><span class="p">.</span><span class="n">get_range</span><span class="p">(</span><span class="mi">32</span><span class="p">..</span><span class="mi">64</span><span class="p">));</span><span class="w"></span>
+
+<span class="w">        </span><span class="n">Descriptor</span><span class="o">::</span><span class="n">SystemSegment</span><span class="p">(</span><span class="n">low</span><span class="p">,</span><span class="w"> </span><span class="n">high</span><span class="p">)</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>We convert the passed <code>TaskStateSegment</code> reference to an <code>u64</code> and use the methods of the <a href="https://docs.rs/bit_field/0.6.0/bit_field/trait.BitField.html#method.get_bit"><code>BitField</code> trait</a> to set the needed fields.
+We require the <code>'static</code> lifetime for the <code>TaskStateSegment</code> reference, since the hardware might access it on every interrupt as long as the OS runs.</p>
+
+<h4 id="adding-descriptors-to-the-gdt">Adding Descriptors to the GDT</h4>
+
+<p>In order to add descriptors to the GDT, we add a <code>add_entry</code> method:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/gdt.rs</span>
+
+<span class="kn">use</span><span class="w"> </span><span class="n">x86</span><span class="o">::</span><span class="n">shared</span><span class="o">::</span><span class="n">segmentation</span><span class="o">::</span><span class="n">SegmentSelector</span><span class="p">;</span><span class="w"></span>
+<span class="kn">use</span><span class="w"> </span><span class="n">x86</span><span class="o">::</span><span class="n">shared</span><span class="o">::</span><span class="n">PrivilegeLevel</span><span class="p">;</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">Gdt</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">add_entry</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">entry</span><span class="o">:</span><span class="w"> </span><span class="n">Descriptor</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">SegmentSelector</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">index</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">match</span><span class="w"> </span><span class="n">entry</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="n">Descriptor</span><span class="o">::</span><span class="n">UserSegment</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">push</span><span class="p">(</span><span class="n">value</span><span class="p">),</span><span class="w"></span>
+<span class="w">            </span><span class="n">Descriptor</span><span class="o">::</span><span class="n">SystemSegment</span><span class="p">(</span><span class="n">value_low</span><span class="p">,</span><span class="w"> </span><span class="n">value_high</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="kd">let</span><span class="w"> </span><span class="n">index</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">push</span><span class="p">(</span><span class="n">value_low</span><span class="p">);</span><span class="w"></span>
+<span class="w">                </span><span class="bp">self</span><span class="p">.</span><span class="n">push</span><span class="p">(</span><span class="n">value_high</span><span class="p">);</span><span class="w"></span>
+<span class="w">                </span><span class="n">index</span><span class="w"></span>
+<span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="w">        </span><span class="p">};</span><span class="w"></span>
+<span class="w">        </span><span class="n">SegmentSelector</span><span class="o">::</span><span class="n">new</span><span class="p">(</span><span class="n">index</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">u16</span><span class="p">,</span><span class="w"> </span><span class="n">PrivilegeLevel</span><span class="o">::</span><span class="n">Ring0</span><span class="p">)</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>For an user segment we just push the <code>u64</code> and remember the index. For a system segment, we push the low and high <code>u64</code> and use the index of the low value. We then use this index to return a new <a href="https://docs.rs/x86/0.8.0/x86/shared/segmentation/struct.SegmentSelector.html#method.new">SegmentSelector</a>.</p>
+
+<p>The <code>push</code> method looks like this:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/gdt.rs</span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">Gdt</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="n">push</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="o">:</span><span class="w"> </span><span class="kt">u64</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="kt">usize</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">next_free</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">table</span><span class="p">.</span><span class="n">len</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="n">index</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">next_free</span><span class="p">;</span><span class="w"></span>
+<span class="w">            </span><span class="bp">self</span><span class="p">.</span><span class="n">table</span><span class="p">[</span><span class="n">index</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">value</span><span class="p">;</span><span class="w"></span>
+<span class="w">            </span><span class="bp">self</span><span class="p">.</span><span class="n">next_free</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
+<span class="w">            </span><span class="n">index</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="n">panic</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;GDT full&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>The method just writes to the <code>next_free</code> entry and returns the corresponding index. If there is no free entry left, we panic since this likely indicates a programming error (we should never need to create more than two or three GDT entries for our kernel).</p>
+
+<h4 id="loading-the-gdt">Loading the GDT</h4>
+
+<p>To load the GDT, we add a new <code>load</code> method:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/gdt.rs</span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">Gdt</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">load</span><span class="p">(</span><span class="o">&amp;</span><span class="nb">&#39;static</span><span class="w"> </span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kn">use</span><span class="w"> </span><span class="n">x86</span><span class="o">::</span><span class="n">shared</span><span class="o">::</span><span class="n">dtables</span><span class="o">::</span><span class="p">{</span><span class="n">DescriptorTablePointer</span><span class="p">,</span><span class="w"> </span><span class="n">lgdt</span><span class="p">};</span><span class="w"></span>
+<span class="w">        </span><span class="kn">use</span><span class="w"> </span><span class="n">x86</span><span class="o">::</span><span class="n">shared</span><span class="o">::</span><span class="n">segmentation</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="kn">use</span><span class="w"> </span><span class="n">core</span><span class="o">::</span><span class="n">mem</span><span class="o">::</span><span class="n">size_of</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DescriptorTablePointer</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="n">base</span><span class="o">:</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">table</span><span class="p">.</span><span class="n">as_ptr</span><span class="p">()</span><span class="w"> </span><span class="k">as</span><span class="w"></span>
+<span class="w">                </span><span class="o">*</span><span class="kr">const</span><span class="w"> </span><span class="n">segmentation</span><span class="o">::</span><span class="n">SegmentDescriptor</span><span class="p">,</span><span class="w"></span>
+<span class="w">            </span><span class="n">limit</span><span class="o">:</span><span class="w"> </span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">table</span><span class="p">.</span><span class="n">len</span><span class="p">()</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">size_of</span><span class="o">::&lt;</span><span class="kt">u64</span><span class="o">&gt;</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">u16</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="p">};</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">lgdt</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ptr</span><span class="p">)</span><span class="w"> </span><span class="p">};</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>We use the <a href="https://docs.rs/x86/0.8.0/x86/shared/dtables/struct.DescriptorTablePointer.html"><code>DescriptorTablePointer</code> struct</a> and the <a href="https://docs.rs/x86/0.8.0/x86/shared/dtables/fn.lgdt.html"><code>lgdt</code> function</a> provided by the <code>x86</code> crate to load our GDT. Again, we require a <code>'static</code> reference since the GDT possibly needs to live for the rest of the run time.</p>
+
+<h3 id="putting-it-together">Putting it together</h3>
+
+<p>We now have a double fault stack and are able to create and load a TSS (which contains an IST). So let&rsquo;s put everything together to catch kernel stack overflows.</p>
+
+<p>We already created a new TSS in our <code>interrupts::init</code> function. Now we can load this TSS by creating a new GDT:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
+
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">init</span><span class="p">(</span><span class="n">memory_controller</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">MemoryController</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">double_fault_stack</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memory_controller</span><span class="p">.</span><span class="n">alloc_stack</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"></span>
+<span class="w">        </span><span class="p">.</span><span class="n">expect</span><span class="p">(</span><span class="s">&quot;could not allocate double fault stack&quot;</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">tss</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskStateSegment</span><span class="o">::</span><span class="n">new</span><span class="p">();</span><span class="w"></span>
+<span class="w">    </span><span class="n">tss</span><span class="p">.</span><span class="n">ist</span><span class="p">[</span><span class="n">DOUBLE_FAULT_IST_INDEX</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">double_fault_stack</span><span class="p">.</span><span class="n">top</span><span class="p">()</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">u64</span><span class="p">;</span><span class="w"></span>
+
+<span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">gdt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gdt</span><span class="o">::</span><span class="n">Gdt</span><span class="o">::</span><span class="n">new</span><span class="p">();</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">code_selector</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gdt</span><span class="p">.</span><span class="n">add_entry</span><span class="p">(</span><span class="n">gdt</span><span class="o">::</span><span class="n">Descriptor</span><span class="o">::</span><span class="n">kernel_code_segment</span><span class="p">());</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">tss_selector</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gdt</span><span class="p">.</span><span class="n">add_entry</span><span class="p">(</span><span class="n">gdt</span><span class="o">::</span><span class="n">Descriptor</span><span class="o">::</span><span class="n">tss_segment</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tss</span><span class="p">));</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="n">gdt</span><span class="p">.</span><span class="n">load</span><span class="p">();</span><span class="w"></span>
+</span>
+<span class="w">    </span><span class="n">IDT</span><span class="p">.</span><span class="n">load</span><span class="p">();</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>However, when we try to compile it, the following errors occur:</p>
+
+<pre><code>error: `tss` does not live long enough
+   --&gt; src/interrupts/mod.rs:118:68
+    |
+118 |    let tss_selector = gdt.add_entry(gdt::Descriptor::tss_segment(&amp;tss));
+    |                                         does not live long enough ^^^
+...
+122 | }
+    | - borrowed value only lives until here
+    |
+    = note: borrowed value must be valid for the static lifetime...
+
+error: `gdt` does not live long enough
+   --&gt; src/interrupts/mod.rs:119:5
+    |
+119 |    gdt.load();
+    |    ^^^ does not live long enough
+...
+122 | }
+    | - borrowed value only lives until here
+    |
+    = note: borrowed value must be valid for the static lifetime...
+</code></pre>
+
+<p>The problem is that we require that the TSS and GDT are valid for the rest of the run time (i.e. for the <code>'static</code> lifetime). But our created <code>tss</code> and <code>gdt</code> live on the stack and are thus destroyed at the end of the <code>init</code> function. So how do we fix this problem?</p>
+
+<p>We could allocate our TSS and GDT on the heap using <code>Box</code> and use <a href="https://doc.rust-lang.org/std/boxed/struct.Box.html#method.into_raw">into_raw</a> and a bit of <code>unsafe</code> to convert it to <code>&amp;'static</code> references (<a href="https://github.com/rust-lang/rfcs/pull/1233">RFC 1233</a> was closed unfortunately).</p>
+
+<p>Alternatively, we could store them in a <code>static</code> somehow. The <a href="https://docs.rs/lazy_static/0.2.2/lazy_static/"><code>lazy_static</code> macro</a> doesn&rsquo;t work here, since we need access to the <code>MemoryController</code> for initialization. However, we can use its fundamental building block, the <a href="https://docs.rs/spin/0.4.5/spin/struct.Once.html"><code>spin::Once</code> type</a>.</p>
+
+<h4 id="spin-once">spin::Once</h4>
+
+<p>Let&rsquo;s try to solve our problem using <a href="https://docs.rs/spin/0.4.5/spin/struct.Once.html"><code>spin::Once</code></a>:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
+
+<span class="kn">use</span><span class="w"> </span><span class="n">spin</span><span class="o">::</span><span class="n">Once</span><span class="p">;</span><span class="w"></span>
+
+<span class="k">static</span><span class="w"> </span><span class="n">TSS</span><span class="o">:</span><span class="w"> </span><span class="n">Once</span><span class="o">&lt;</span><span class="n">TaskStateSegment</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Once</span><span class="o">::</span><span class="n">new</span><span class="p">();</span><span class="w"></span>
+<span class="k">static</span><span class="w"> </span><span class="n">GDT</span><span class="o">:</span><span class="w"> </span><span class="n">Once</span><span class="o">&lt;</span><span class="n">gdt</span><span class="o">::</span><span class="n">Gdt</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Once</span><span class="o">::</span><span class="n">new</span><span class="p">();</span><span class="w"></span>
+</code></pre></div>
+
+<p>The <code>Once</code> type allows us to initialize a <code>static</code> at runtime. It is safe because the only way to access the static value is through the provided methods (<a href="https://docs.rs/spin/0.4.5/spin/struct.Once.html#method.call_once">call_once</a>, <a href="https://docs.rs/spin/0.4.5/spin/struct.Once.html#method.try">try</a>, and <a href="https://docs.rs/spin/0.4.5/spin/struct.Once.html#method.wait">wait</a>). Thus, no value can be read before initialization and the value can only be initialized once.</p>
+
+<p>(The <code>Once</code> was added in spin 0.4, so you&rsquo;re probably need to update your spin dependency.)</p>
+
+<p>So let&rsquo;s rewrite our <code>interrupts::init</code> function to use the static <code>TSS</code> and <code>GDT</code>:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">init</span><span class="p">(</span><span class="n">memory_controller</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">MemoryController</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">double_fault_stack</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memory_controller</span><span class="p">.</span><span class="n">alloc_stack</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"></span>
+<span class="w">        </span><span class="p">.</span><span class="n">expect</span><span class="p">(</span><span class="s">&quot;could not allocate double fault stack&quot;</span><span class="p">);</span><span class="w"></span>
+
+<span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">tss</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TSS</span><span class="p">.</span><span class="n">call_once</span><span class="p">(</span><span class="o">||</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">tss</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskStateSegment</span><span class="o">::</span><span class="n">new</span><span class="p">();</span><span class="w"></span>
+<span class="w">        </span><span class="n">tss</span><span class="p">.</span><span class="n">ist</span><span class="p">[</span><span class="n">DOUBLE_FAULT_IST_INDEX</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">double_fault_stack</span><span class="p">.</span><span class="n">top</span><span class="p">()</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">u64</span><span class="p">;</span><span class="w"></span>
+<span class="hll"><span class="w">        </span><span class="n">tss</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="p">});</span><span class="w"></span>
+</span>
+<span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">gdt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GDT</span><span class="p">.</span><span class="n">call_once</span><span class="p">(</span><span class="o">||</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">gdt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gdt</span><span class="o">::</span><span class="n">Gdt</span><span class="o">::</span><span class="n">new</span><span class="p">();</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">code_selector</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gdt</span><span class="p">.</span><span class="n">add_entry</span><span class="p">(</span><span class="n">gdt</span><span class="o">::</span><span class="n">Descriptor</span><span class="o">::</span><span class="w"></span>
+<span class="w">                            </span><span class="n">kernel_code_segment</span><span class="p">());</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">tss_selector</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gdt</span><span class="p">.</span><span class="n">add_entry</span><span class="p">(</span><span class="n">gdt</span><span class="o">::</span><span class="n">Descriptor</span><span class="o">::</span><span class="n">tss_segment</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tss</span><span class="p">));</span><span class="w"></span>
+<span class="hll"><span class="w">        </span><span class="n">gdt</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="p">});</span><span class="w"></span>
+</span><span class="w">    </span><span class="n">gdt</span><span class="p">.</span><span class="n">load</span><span class="p">();</span><span class="w"></span>
+
+<span class="w">    </span><span class="n">IDT</span><span class="p">.</span><span class="n">load</span><span class="p">();</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>Now it should compile again!</p>
+
+<h4 id="the-final-steps">The final Steps</h4>
+
+<p>We&rsquo;re almost done. We successfully loaded our new GDT, which contains a TSS descriptor. Now there are just a few steps left:</p>
+
+<ol>
+<li>We changed our GDT, so we should reload the <code>cs</code>, the code segment register. This required since the old segment selector could point a different GDT descriptor now (e.g. a TSS descriptor).</li>
+<li>We loaded a GDT that contains a TSS selector, but we still need to tell the CPU that it should use that TSS.</li>
+<li>As soon as our TSS is loaded, the CPU has access to a valid interrupt stack table (IST). Then we can tell the CPU that it should use our new double fault stack by modifying our double fault IDT entry.</li>
+</ol>
+
+<p>For the first two steps, we need access to the <code>code_selector</code> and <code>tss_selector</code> variables outside of the closure. We can achieve this by moving the <code>let</code> declarations out of the closure:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">init</span><span class="p">(</span><span class="n">memory_controller</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">MemoryController</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="hll"><span class="w">    </span><span class="kn">use</span><span class="w"> </span><span class="n">x86</span><span class="o">::</span><span class="n">shared</span><span class="o">::</span><span class="n">segmentation</span><span class="o">::</span><span class="p">{</span><span class="n">SegmentSelector</span><span class="p">,</span><span class="w"> </span><span class="n">set_cs</span><span class="p">};</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="kn">use</span><span class="w"> </span><span class="n">x86</span><span class="o">::</span><span class="n">shared</span><span class="o">::</span><span class="n">task</span><span class="o">::</span><span class="n">load_tr</span><span class="p">;</span><span class="w"></span>
+</span><span class="w">    </span><span class="p">...</span><span class="w"></span>
+
+<span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">code_selector</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SegmentSelector</span><span class="o">::</span><span class="n">empty</span><span class="p">();</span><span class="w"></span>
+</span><span class="hll"><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">tss_selector</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SegmentSelector</span><span class="o">::</span><span class="n">empty</span><span class="p">();</span><span class="w"></span>
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">gdt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GDT</span><span class="p">.</span><span class="n">call_once</span><span class="p">(</span><span class="o">||</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">gdt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gdt</span><span class="o">::</span><span class="n">Gdt</span><span class="o">::</span><span class="n">new</span><span class="p">();</span><span class="w"></span>
+<span class="hll"><span class="w">        </span><span class="n">code_selector</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gdt</span><span class="p">.</span><span class="n">add_entry</span><span class="p">(</span><span class="n">gdt</span><span class="o">::</span><span class="n">Descriptor</span><span class="o">::</span><span class="n">kernel_code_segment</span><span class="p">());</span><span class="w"></span>
+</span><span class="hll"><span class="w">        </span><span class="n">tss_selector</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">gdt</span><span class="p">.</span><span class="n">add_entry</span><span class="p">(</span><span class="n">gdt</span><span class="o">::</span><span class="n">Descriptor</span><span class="o">::</span><span class="n">tss_segment</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tss</span><span class="p">));</span><span class="w"></span>
+</span><span class="w">        </span><span class="n">gdt</span><span class="w"></span>
+<span class="w">    </span><span class="p">});</span><span class="w"></span>
+<span class="w">    </span><span class="n">gdt</span><span class="p">.</span><span class="n">load</span><span class="p">();</span><span class="w"></span>
+
+<span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="c1">// reload code segment register</span>
+<span class="hll"><span class="w">        </span><span class="n">set_cs</span><span class="p">(</span><span class="n">code_selector</span><span class="p">);</span><span class="w"></span>
+</span><span class="w">        </span><span class="c1">// load TSS</span>
+<span class="hll"><span class="w">        </span><span class="n">load_tr</span><span class="p">(</span><span class="n">tss_selector</span><span class="p">);</span><span class="w"></span>
+</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
+
+<span class="w">    </span><span class="n">IDT</span><span class="p">.</span><span class="n">load</span><span class="p">();</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>We first set the descriptors to <code>empty</code> and then update them from inside the closure (which implicitly borrows them as <code>&amp;mut</code>). Now we&rsquo;re able to reload the code segment register using <a href="https://docs.rs/x86/0.8.0/x86/shared/segmentation/fn.set_cs.html"><code>set_cs</code></a> and to load the TSS using <a href="https://docs.rs/x86/0.8.0/x86/shared/task/fn.load_tr.html"><code>load_tr</code></a>.</p>
+
+<p>Now that we loaded a valid TSS and interrupt stack table, we can set the stack index for our double fault handler in the IDT:</p>
+
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupt/mod.rs</span>
+
+<span class="n">lazy_static</span><span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">ref</span><span class="w"> </span><span class="n">IDT</span><span class="o">:</span><span class="w"> </span><span class="n">idt</span><span class="o">::</span><span class="n">Idt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">idt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">idt</span><span class="o">::</span><span class="n">Idt</span><span class="o">::</span><span class="n">new</span><span class="p">();</span><span class="w"></span>
+<span class="w">        </span><span class="p">...</span><span class="w"></span>
+<span class="w">        </span><span class="n">idt</span><span class="p">.</span><span class="n">set_handler</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">handler_with_error_code</span><span class="o">!</span><span class="p">(</span><span class="n">double_fault_handler</span><span class="p">))</span><span class="w"></span>
+<span class="hll"><span class="w">            </span><span class="p">.</span><span class="n">set_stack_index</span><span class="p">(</span><span class="n">DOUBLE_FAULT_IST_INDEX</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">u16</span><span class="p">);</span><span class="w"></span>
+</span><span class="w">        </span><span class="p">...</span><span class="w"></span>
+<span class="w">    </span><span class="p">};</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+
+<p>We also rewrite the <code>set_stack_index</code> method in <code>src/interrupts/idt.rs</code>:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">set_stack_index</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">index</span><span class="o">:</span><span class="w"> </span><span class="kt">u16</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">Self</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// The hardware IST index starts at 1, but our software IST index</span>
+<span class="w">    </span><span class="c1">// starts at 0. Therefore we need to add 1 here.</span>
+<span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="mf">0.</span><span class="n">set_range</span><span class="p">(</span><span class="mi">0</span><span class="p">..</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="n">index</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="bp">self</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>The only change is that we&rsquo;re now adding <code>1</code> to the passed <code>index</code>, because the hardware expects an index between <em>one</em> and seven. A zero means “no stack switch”.</p>
+
+<p>That&rsquo;s it! Now the CPU should switch to the double fault stack whenever a double fault occurs. Thus, we are able to catch <em>all</em> double faults, including kernel stack overflows:</p>
+
+<p><img src="images/qemu-double-fault-on-stack-overflow.png" alt="QEMU printing `EXCEPTION: DOUBLE FAULT` and a dump of the exception stack frame" /></p>
+
+<p>From now on we should never see a triple fault again!</p>
+
+<h2 id="safety-problems">Safety Problems</h2>
+
+<p>In this post, we needed a few <code>unsafe</code> blocks to load the GDT and TSS structures. We always used <code>'static</code> references, so the passed addresses should be always valid.</p>
+
+<p>However, the IST entries (stored in the TSS) are used as stack pointers by the CPU. This can lead to various memory safety violations:</p>
+
+<ul>
+<li>The CPU writes to any address that we store in the IST. This way, we can easily circumvent Rust&rsquo;s safety guarantees and e.g. overwrite a <code>&amp;mut</code> reference on some random stack space.</li>
+<li>If we use the same stack index for multiple exceptions, memory safety might be violated too. For example, imagine that the double fault hander and the breakpoint handler use the same IST index. If the double fault handler causes a breakpoint exception, the breakpoint overwrites the stack frame of the double fault handler. When the breakpoint returns, the CPU jumps back to the double fault handler and undefined behavior occurs.</li>
+<li>If we accidentally use an empty IST entry, the CPU uses the stack pointer <code>0</code>. This is really bad, since we overwrite our <a href="/modifying-page-tables.html#recursive-mapping">recursively mapped</a> page tables this way.</li>
+</ul>
+
+<p>Let&rsquo;s try the last case (empty IST entry) as an example:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrups/mod.rs</span>
+
+<span class="n">lazy_static</span><span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">ref</span><span class="w"> </span><span class="n">IDT</span><span class="o">:</span><span class="w"> </span><span class="n">idt</span><span class="o">::</span><span class="n">Idt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="p">...</span><span class="w"></span>
+<span class="w">        </span><span class="n">idt</span><span class="p">.</span><span class="n">set_handler</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span><span class="w"> </span><span class="n">handler_with_error_code</span><span class="o">!</span><span class="p">(</span><span class="n">double_fault_handler</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="p">.</span><span class="n">set_stack_index</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="p">...</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>Instead of using the <code>DOUBLE_FAULT_IST_INDEX</code>, we use the IST index 5. However the entry at index 5 is still empty.</p>
+
+<p>In oder to see the effect, we print the exception stack frame pointer in our <code>double_fault_handler</code>:</p>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/interrupts/mod.rs</span>
+
+<span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">double_fault_handler</span><span class="p">(</span><span class="n">stack_frame</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="n">ExceptionStackFrame</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="n">_error_code</span><span class="o">:</span><span class="w"> </span><span class="kt">u64</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\n</span><span class="s">EXCEPTION: DOUBLE FAULT</span><span class="se">\n</span><span class="s">{:#?}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">stack_frame</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">println</span><span class="o">!</span><span class="p">(</span><span class="s">&quot;exception stack frame at {:#p}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">stack_frame</span><span class="p">);</span><span class="w"> </span><span class="c1">// new</span>
+<span class="w">    </span><span class="k">loop</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</code></pre></div>
+
+<p>When we start our kernel now, we see that the exception stack frame was written to <code>0xffffffffffffffd8</code>:</p>
+
+<p><img src="images/qemu-empty-IST-entry.png" alt="QEMU printing `exception stack frame at 0xffffffffffffffd8" /></p>
+
+<p>This address is part of the <a href="/modifying-page-tables.html#recursive-mapping">recursive mapping</a>, so the CPU just overwrote some random page table entries.</p>
+
+<h3 id="possible-solutions">Possible Solutions?</h3>
+
+<p>Normally, the type system allows us to make things safer. Unfortunately, there are many difficulties in this case. For example, we need to be able to create multiple task state segments since we have multiple CPUs (each CPU has its own TSS). Each IST index is only valid if the corresponding TSS is loaded in the CPU. This makes compile-time abstractions very difficult.</p>
+
+<p>So this might be a case where we have to tolerate the safety dangers <sup class="footnote-ref" id="fnref:fn-ideas"><a rel="footnote" href="#fn:fn-ideas">1</a></sup>. At least, they are limited to the <code>interrupts</code> module, where we already have lots of dangerous inline assembly. From outside, only the safe <code>interrupts::init</code> function is visible, so it is similar to an <a href="http://smallcultfollowing.com/babysteps/blog/2016/05/23/unsafe-abstractions/">unsafe abstraction</a>. We only need to be aware of the safety dangers when we edit the <code>interrupts</code> module in the future.</p>
+
+<h2 id="what-s-next">What&rsquo;s next?</h2>
+
+<p>Now that we mastered exceptions, it&rsquo;s time to explore another kind of interrupts: interrupts from external devices such as timers, keyboards, or network controllers. These hardware interrupts are very similar to exceptions, e.g. they are also dispatched through the IDT.</p>
+
+<p>However, unlike exceptions, they don&rsquo;t arise directly on the CPU. Instead, an <em>interrupt controller</em> aggregates these interrupts and forwards them to CPU depending on their priority. In the next posts we will explore the two interrupt controller variants on x86: the <a href="https://en.wikipedia.org/wiki/Intel_8259">Intel 8259</a> (“PIC”) and the <a href="https://en.wikipedia.org/wiki/Advanced_Programmable_Interrupt_Controller">APIC</a>. This will allow us to react to keyboard and mouse input.</p>
+<div class="footnotes">
+
+<hr />
+
+<ol>
+<li id="fn:fn-ideas">If somebody has a good solution for this problem, please tell me :).
+ <a class="footnote-return" href="#fnref:fn-ideas"><sup>[return]</sup></a></li>
+</ol>
+</div>
+
+</article>
+
+<hr>
+<div class="PageNavigation">
+  
+    <a class="prev" href="/returning-from-exceptions.html">&laquo; Returning from Exceptions</a>
+  
+  
+</div>
+<hr>
+
+<div id="disqus_thread"></div>
+<script>
+  (function() {
+    
+    
+    if (window.location.hostname == "localhost")
+        return;
+
+    var d = document, s = d.createElement('script');
+
+    s.src = '//phil-opp.disqus.com/embed.js';
+
+    s.setAttribute('data-timestamp', +new Date());
+    (d.head || d.body).appendChild(s);
+  })();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript" rel="nofollow">comments powered by Disqus.</a></noscript>
+
+<script type="text/javascript">
+  anchors.options = {
+    placement: 'left',
+  };
+  anchors.add('article h2, article h3, article h4, article h5, article h6');
+</script>
+
+</main>
+
+<footer class="footer">
+  <small>
+    &copy;
+    <time datetime="2017">2017</time>. All rights reserved.
+    <a href="/contact.html">Contact</a>
+  </small>
+</footer>
+</div>
+
+</body>
+</html>
+
