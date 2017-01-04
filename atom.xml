@@ -2300,7 +2300,7 @@ RSI=[...] RDI=[...] RBP=0000000000118d28 RSP=[...]
 
 &lt;h3 id=&#34;calling-conventions&#34;&gt;Calling Conventions&lt;/h3&gt;
 
-&lt;p&gt;The reason is that our exception handler is defined as &lt;code&gt;extern &amp;quot;C&amp;quot; function&lt;/code&gt;, which specifies that it&amp;rsquo;s using the C &lt;a href=&#34;https://en.wikipedia.org/wiki/X86_calling_conventions&#34;&gt;calling convention&lt;/a&gt;. On x86_64 Linux, the C calling convention is specified by the System V AMD64 ABI (&lt;a href=&#34;http://www.x86-64.org/documentation/abi.pdf&#34;&gt;PDF&lt;/a&gt;). Section 3.2.2 defines the following:&lt;/p&gt;
+&lt;p&gt;The reason is that our exception handler is defined as &lt;code&gt;extern &amp;quot;C&amp;quot; function&lt;/code&gt;, which specifies that it&amp;rsquo;s using the C &lt;a href=&#34;https://en.wikipedia.org/wiki/X86_calling_conventions&#34;&gt;calling convention&lt;/a&gt;. On x86_64 Linux, the C calling convention is specified by the System V AMD64 ABI (&lt;a href=&#34;http://web.archive.org/web/20160801075139/http://www.x86-64.org/documentation/abi.pdf&#34;&gt;PDF&lt;/a&gt;). Section 3.2.2 defines the following:&lt;/p&gt;
 
 &lt;blockquote&gt;
 &lt;p&gt;The end of the input argument area shall be aligned on a 16 byte boundary. In other words, the value (%rsp + 8) is always a multiple of 16 when control is transferred to the function entry point.&lt;/p&gt;
@@ -3057,7 +3057,7 @@ note: ...but borrowed value is only valid for the block suffix following
 &lt;span class=&#34;p&#34;&gt;}&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;We register a single handler function for a &lt;a href=&#34;index 0&#34;&gt;divide by zero error&lt;/a&gt;. Like the name says, this exception occurs when dividing a number by 0. Thus we have an easy way to test our new exception handler.&lt;/p&gt;
+&lt;p&gt;We register a single handler function for a &lt;a href=&#34;http://wiki.osdev.org/Exceptions#Divide-by-zero_Error&#34;&gt;divide by zero error&lt;/a&gt; (index 0). Like the name says, this exception occurs when dividing a number by 0. Thus we have an easy way to test our new exception handler.&lt;/p&gt;
 
 &lt;p&gt;However, it doesn&amp;rsquo;t work this way:&lt;/p&gt;
 
@@ -3476,7 +3476,7 @@ check_exception old: 0xffffffff new 0xe
 …
 &lt;/code&gt;&lt;/pre&gt;
 
-&lt;p&gt;Aha! It&amp;rsquo;s a &lt;a href=&#34;`v=0e`&#34;&gt;page fault&lt;/a&gt; and was caused by the code at &lt;code&gt;0x102860&lt;/code&gt;. The code tried to write (&lt;code&gt;e=0002&lt;/code&gt;) to address &lt;code&gt;0x40000000&lt;/code&gt;. This address is &lt;code&gt;0o_000_001_000_000_0000&lt;/code&gt; in octal, which is the &lt;code&gt;HEAP_START&lt;/code&gt; address defined above. Of course it page-faults: We have forgotten to map the heap memory to some physical memory.&lt;/p&gt;
+&lt;p&gt;Aha! It&amp;rsquo;s a &lt;a href=&#34;http://wiki.osdev.org/Exceptions#Page_Fault&#34;&gt;page fault&lt;/a&gt; (&lt;code&gt;v=0e&lt;/code&gt;) and was caused by the code at &lt;code&gt;0x102860&lt;/code&gt;. The code tried to write (&lt;code&gt;e=0002&lt;/code&gt;) to address &lt;code&gt;0x40000000&lt;/code&gt;. This address is &lt;code&gt;0o_000_001_000_000_0000&lt;/code&gt; in octal, which is the &lt;code&gt;HEAP_START&lt;/code&gt; address defined above. Of course it page-faults: We have forgotten to map the heap memory to some physical memory.&lt;/p&gt;
 
 &lt;h3 id=&#34;some-refactoring&#34;&gt;Some Refactoring&lt;/h3&gt;
 
@@ -3564,7 +3564,7 @@ check_exception old: 0xffffffff new 0xe
 &lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;crate&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;kr&#34;&gt;once&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;;&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;The crate provides an &lt;a href=&#34;https://phil-opp.rustdocs.org/once/macro.assert_has_not_been_called!.html&#34;&gt;assert_has_not_been_called!&lt;/a&gt; macro (sorry for the long name :D). We can use it to fix the safety problem easily:&lt;/p&gt;
+&lt;p&gt;The crate provides an &lt;a href=&#34;https://docs.rs/once/0.3.2/once/macro.assert_has_not_been_called!.html&#34;&gt;assert_has_not_been_called!&lt;/a&gt; macro (sorry for the long name :D). We can use it to fix the safety problem easily:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/memory/mod.rs&lt;/span&gt;
 
 &lt;span class=&#34;k&#34;&gt;pub&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;k&#34;&gt;fn&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;n&#34;&gt;init&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;boot_info&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;amp;&lt;/span&gt;&lt;span class=&#34;n&#34;&gt;BootInformation&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt;&lt;span class=&#34;w&#34;&gt; &lt;/span&gt;&lt;span class=&#34;p&#34;&gt;{&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
@@ -4947,7 +4947,7 @@ check_exception old: 0xffffffff new 0xe
 
 &lt;h2 id=&#34;what-s-next&#34;&gt;What&amp;rsquo;s next?&lt;/h2&gt;
 
-&lt;p&gt;Now that we have a (mostly) safe kernel stack and a working page table module, we can add a virtual memory allocator. The &lt;a href=&#34;http://os.phil-opp.com/kernel-heap.html&#34;&gt;next post&lt;/a&gt; will explore Rust&amp;rsquo;s allocator API and create a very basic allocator. At the end of that post, we will be able to use Rust&amp;rsquo;s allocation and collections types such as &lt;a href=&#34;https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html&#34;&gt;Box&lt;/a&gt;, &lt;a href=&#34;https://doc.rust-lang.org/nightly/collections/vec/struct.Vec.html&#34;&gt;Vec&lt;/a&gt;, or even &lt;a href=&#34;https://doc.rust-lang.org/nightly/collections/struct.BTreeMap.html&#34;&gt;BTreeMap&lt;/a&gt;.&lt;/p&gt;
+&lt;p&gt;Now that we have a (mostly) safe kernel stack and a working page table module, we can add a virtual memory allocator. The &lt;a href=&#34;http://os.phil-opp.com/kernel-heap.html&#34;&gt;next post&lt;/a&gt; will explore Rust&amp;rsquo;s allocator API and create a very basic allocator. At the end of that post, we will be able to use Rust&amp;rsquo;s allocation and collections types such as &lt;a href=&#34;https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html&#34;&gt;Box&lt;/a&gt;, &lt;a href=&#34;https://doc.rust-lang.org/nightly/collections/vec/struct.Vec.html&#34;&gt;Vec&lt;/a&gt;, or even &lt;a href=&#34;https://doc.rust-lang.org/nightly/collections/btree_map/struct.BTreeMap.html&#34;&gt;BTreeMap&lt;/a&gt;.&lt;/p&gt;
 &lt;div class=&#34;footnotes&#34;&gt;
 
 &lt;hr /&gt;
@@ -6851,7 +6851,7 @@ multiboot_start: 0x11d400, multiboot_end: 0x11d9c8
 &lt;span class=&#34;p&#34;&gt;});&lt;/span&gt;&lt;span class=&#34;w&#34;&gt;&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;&lt;a href=&#34;https://mvdnes.github.io/rust-docs/spinlock-rs/spin/struct.Mutex.html#method.new&#34;&gt;Mutex::new&lt;/a&gt; is a const function, too, so it can be used in statics.&lt;/p&gt;
+&lt;p&gt;&lt;a href=&#34;https://docs.rs/spin/0.4.5/spin/struct.Mutex.html#method.new&#34;&gt;Mutex::new&lt;/a&gt; is a const function, too, so it can be used in statics.&lt;/p&gt;
 
 &lt;p&gt;Now we can easily print from our main function:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-rust&#34; data-lang=&#34;rust&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;c1&#34;&gt;// in src/lib.rs&lt;/span&gt;

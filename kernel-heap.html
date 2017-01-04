@@ -342,7 +342,7 @@ check_exception old: 0xffffffff new 0xe
 …
 </code></pre>
 
-<p>Aha! It&rsquo;s a <a href="`v=0e`">page fault</a> and was caused by the code at <code>0x102860</code>. The code tried to write (<code>e=0002</code>) to address <code>0x40000000</code>. This address is <code>0o_000_001_000_000_0000</code> in octal, which is the <code>HEAP_START</code> address defined above. Of course it page-faults: We have forgotten to map the heap memory to some physical memory.</p>
+<p>Aha! It&rsquo;s a <a href="http://wiki.osdev.org/Exceptions#Page_Fault">page fault</a> (<code>v=0e</code>) and was caused by the code at <code>0x102860</code>. The code tried to write (<code>e=0002</code>) to address <code>0x40000000</code>. This address is <code>0o_000_001_000_000_0000</code> in octal, which is the <code>HEAP_START</code> address defined above. Of course it page-faults: We have forgotten to map the heap memory to some physical memory.</p>
 
 <h3 id="some-refactoring">Some Refactoring</h3>
 
@@ -430,7 +430,7 @@ check_exception old: 0xffffffff new 0xe
 <span class="k">extern</span><span class="w"> </span><span class="k">crate</span><span class="w"> </span><span class="kr">once</span><span class="p">;</span><span class="w"></span>
 </code></pre></div>
 
-<p>The crate provides an <a href="https://phil-opp.rustdocs.org/once/macro.assert_has_not_been_called!.html">assert_has_not_been_called!</a> macro (sorry for the long name :D). We can use it to fix the safety problem easily:</p>
+<p>The crate provides an <a href="https://docs.rs/once/0.3.2/once/macro.assert_has_not_been_called!.html">assert_has_not_been_called!</a> macro (sorry for the long name :D). We can use it to fix the safety problem easily:</p>
 <div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="c1">// in src/memory/mod.rs</span>
 
 <span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">init</span><span class="p">(</span><span class="n">boot_info</span><span class="o">:</span><span class="w"> </span><span class="o">&amp;</span><span class="n">BootInformation</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
