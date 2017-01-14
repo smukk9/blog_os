@@ -7795,12 +7795,12 @@ check_exception old: 0x8 new 0xd
 
 &lt;h2 id=&#34;the-global-descriptor-table&#34;&gt;The Global Descriptor Table&lt;/h2&gt;
 
-&lt;p&gt;After enabling Paging, the processor is in long mode. So we can use 64-bit instructions now, right? Wrong. The processor is still in some 32-bit compatibility submode. To actually execute 64-bit code, we need to set up a new Global Descriptor Table.
+&lt;p&gt;After enabling Paging, the processor is in long mode. So we can use 64-bit instructions now, right? Wrong. The processor is still in a 32-bit compatibility submode. To actually execute 64-bit code, we need to set up a new Global Descriptor Table.
 The Global Descriptor Table (GDT) was used for &lt;em&gt;Segmentation&lt;/em&gt; in old operating systems. I won&amp;rsquo;t explain Segmentation but the &lt;a href=&#34;http://pages.cs.wisc.edu/~remzi/OSTEP/&#34;&gt;Three Easy Pieces&lt;/a&gt; OS book has good introduction (&lt;a href=&#34;http://pages.cs.wisc.edu/~remzi/OSTEP/vm-segmentation.pdf&#34;&gt;PDF&lt;/a&gt;) again.&lt;/p&gt;
 
 &lt;p&gt;Today almost everyone uses Paging instead of Segmentation (and so do we). But on x86, a GDT is always required, even when you&amp;rsquo;re not using Segmentation. GRUB has set up a valid 32-bit GDT for us but now we need to switch to a long mode GDT.&lt;/p&gt;
 
-&lt;p&gt;A GDT always starts with a 0-entry and contains an arbitrary number of segment entries afterwards. An entry has the following format:&lt;/p&gt;
+&lt;p&gt;A GDT always starts with a 0-entry and contains an arbitrary number of segment entries afterwards. A 64-bit entry has the following format:&lt;/p&gt;
 
 &lt;table&gt;
 &lt;thead&gt;
@@ -7813,33 +7813,15 @@ The Global Descriptor Table (GDT) was used for &lt;em&gt;Segmentation&lt;/em&gt;
 
 &lt;tbody&gt;
 &lt;tr&gt;
-&lt;td&gt;0-15&lt;/td&gt;
-&lt;td&gt;limit 0-15&lt;/td&gt;
-&lt;td&gt;the first 2 byte of the segment&amp;rsquo;s limit&lt;/td&gt;
-&lt;/tr&gt;
-
-&lt;tr&gt;
-&lt;td&gt;16-39&lt;/td&gt;
-&lt;td&gt;base 0-23&lt;/td&gt;
-&lt;td&gt;the first 3 byte of the segment&amp;rsquo;s base address&lt;/td&gt;
-&lt;/tr&gt;
-
-&lt;tr&gt;
-&lt;td&gt;40&lt;/td&gt;
-&lt;td&gt;accessed&lt;/td&gt;
-&lt;td&gt;set by the CPU when the segment is accessed&lt;/td&gt;
-&lt;/tr&gt;
-
-&lt;tr&gt;
-&lt;td&gt;41&lt;/td&gt;
-&lt;td&gt;read/write&lt;/td&gt;
-&lt;td&gt;reads allowed for code segments / writes allowed for data segments&lt;/td&gt;
+&lt;td&gt;0-41&lt;/td&gt;
+&lt;td&gt;ignored&lt;/td&gt;
+&lt;td&gt;ignored in 64-bit mode&lt;/td&gt;
 &lt;/tr&gt;
 
 &lt;tr&gt;
 &lt;td&gt;42&lt;/td&gt;
-&lt;td&gt;direction/conforming&lt;/td&gt;
-&lt;td&gt;the segment grows down (i.e. base&amp;gt;limit) for data segments / the current privilege level can be higher than the specified level for code segments (else it must match exactly)&lt;/td&gt;
+&lt;td&gt;conforming&lt;/td&gt;
+&lt;td&gt;the current privilege level can be higher than the specified level for code segments (else it must match exactly)&lt;/td&gt;
 &lt;/tr&gt;
 
 &lt;tr&gt;
@@ -7867,15 +7849,9 @@ The Global Descriptor Table (GDT) was used for &lt;em&gt;Segmentation&lt;/em&gt;
 &lt;/tr&gt;
 
 &lt;tr&gt;
-&lt;td&gt;48-51&lt;/td&gt;
-&lt;td&gt;limit 16-19&lt;/td&gt;
-&lt;td&gt;bits 16 to 19 of the segment&amp;rsquo;s limit&lt;/td&gt;
-&lt;/tr&gt;
-
-&lt;tr&gt;
-&lt;td&gt;52&lt;/td&gt;
-&lt;td&gt;available&lt;/td&gt;
-&lt;td&gt;freely available to the OS&lt;/td&gt;
+&lt;td&gt;48-52&lt;/td&gt;
+&lt;td&gt;ignored&lt;/td&gt;
+&lt;td&gt;ignored in 64-bit mode&lt;/td&gt;
 &lt;/tr&gt;
 
 &lt;tr&gt;
@@ -7887,39 +7863,32 @@ The Global Descriptor Table (GDT) was used for &lt;em&gt;Segmentation&lt;/em&gt;
 &lt;tr&gt;
 &lt;td&gt;54&lt;/td&gt;
 &lt;td&gt;32-bit&lt;/td&gt;
-&lt;td&gt;should be set for 32-bit segments&lt;/td&gt;
+&lt;td&gt;must be 0 for 64-bit segments&lt;/td&gt;
 &lt;/tr&gt;
 
 &lt;tr&gt;
-&lt;td&gt;55&lt;/td&gt;
-&lt;td&gt;granularity&lt;/td&gt;
-&lt;td&gt;if it&amp;rsquo;s set, the limit is the number of pages, else it&amp;rsquo;s a byte number&lt;/td&gt;
-&lt;/tr&gt;
-
-&lt;tr&gt;
-&lt;td&gt;56-63&lt;/td&gt;
-&lt;td&gt;base 24-31&lt;/td&gt;
-&lt;td&gt;the last byte of the base address&lt;/td&gt;
+&lt;td&gt;55-63&lt;/td&gt;
+&lt;td&gt;ignored&lt;/td&gt;
+&lt;td&gt;ignored in 64-bit mode&lt;/td&gt;
 &lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
 
-&lt;p&gt;We need one code and one data segment. They have the following bits set: &lt;em&gt;descriptor type&lt;/em&gt;, &lt;em&gt;present&lt;/em&gt;, and &lt;em&gt;read/write&lt;/em&gt;. The code segment has additionally the &lt;em&gt;executable&lt;/em&gt; and the &lt;em&gt;64-bit&lt;/em&gt; flag. In Long mode, it&amp;rsquo;s not possible to actually use the GDT entries for Segmentation and thus the base and limit fields must be 0. Translated to assembly the long mode GDT looks like this:&lt;/p&gt;
+&lt;p&gt;We need one code segment, a data segment is not necessary in 64-bit mode. Code segments have the following bits set: &lt;em&gt;descriptor type&lt;/em&gt;, &lt;em&gt;present&lt;/em&gt;, &lt;em&gt;executable&lt;/em&gt; and the &lt;em&gt;64-bit&lt;/em&gt; flag. Translated to assembly the long mode GDT looks like this:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-nasm&#34; data-lang=&#34;nasm&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;k&#34;&gt;section&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;.rodata&lt;/span&gt;
 &lt;span class=&#34;nl&#34;&gt;gdt64:&lt;/span&gt;
     &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;mi&#34;&gt;0&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; zero entry&lt;/span&gt;
-    &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;44&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;47&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;41&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;43&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;53&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; code segment&lt;/span&gt;
-    &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;44&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;47&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;41&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; data segment&lt;/span&gt;
+    &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;43&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;44&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;47&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;53&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; code segment&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;We chose the &lt;code&gt;.rodata&lt;/code&gt; section here because it&amp;rsquo;s initialized read-only data. The &lt;code&gt;dq&lt;/code&gt; command stands for &lt;code&gt;define quad&lt;/code&gt; and outputs a 64-bit constant (similar to &lt;code&gt;dw&lt;/code&gt; and &lt;code&gt;dd&lt;/code&gt;). And the &lt;code&gt;(1&amp;lt;&amp;lt;44)&lt;/code&gt; is a &lt;a href=&#34;http://www.cs.umd.edu/class/sum2003/cmsc311/Notes/BitOp/bitshift.html&#34;&gt;bit shift&lt;/a&gt; that sets bit 44.&lt;/p&gt;
+&lt;p&gt;We chose the &lt;code&gt;.rodata&lt;/code&gt; section here because it&amp;rsquo;s initialized read-only data. The &lt;code&gt;dq&lt;/code&gt; command stands for &lt;code&gt;define quad&lt;/code&gt; and outputs a 64-bit constant (similar to &lt;code&gt;dw&lt;/code&gt; and &lt;code&gt;dd&lt;/code&gt;). And the &lt;code&gt;(1&amp;lt;&amp;lt;43)&lt;/code&gt; is a &lt;a href=&#34;http://www.cs.umd.edu/class/sum2003/cmsc311/Notes/BitOp/bitshift.html&#34;&gt;bit shift&lt;/a&gt; that sets bit 43.&lt;/p&gt;
 
 &lt;h3 id=&#34;loading-the-gdt&#34;&gt;Loading the GDT&lt;/h3&gt;
 
 &lt;p&gt;To load our new 64-bit GDT, we have to tell the CPU its address and length. We do this by passing the memory location of a special pointer structure to the &lt;code&gt;lgdt&lt;/code&gt; (load GDT) instruction. The pointer structure looks like this:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-nasm&#34; data-lang=&#34;nasm&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;nl&#34;&gt;gdt64:&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
-    &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;44&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;47&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;41&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; data segment&lt;/span&gt;
+    &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;mi&#34;&gt;0&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; zero entry&lt;/span&gt;
+    &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;43&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;44&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;47&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;53&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; code segment&lt;/span&gt;
 &lt;span class=&#34;nl&#34;&gt;.pointer:&lt;/span&gt;
     &lt;span class=&#34;kd&#34;&gt;dw&lt;/span&gt; &lt;span class=&#34;kc&#34;&gt;$&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;-&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;gdt64&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;-&lt;/span&gt; &lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;
     &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;gdt64&lt;/span&gt;
@@ -7939,47 +7908,25 @@ The Global Descriptor Table (GDT) was used for &lt;em&gt;Segmentation&lt;/em&gt;
     &lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;When you still see the green &lt;code&gt;OK&lt;/code&gt;, everything went fine and the new GDT is loaded. But we still can&amp;rsquo;t execute 64-bit code: The selector registers such as the code selector &lt;code&gt;cs&lt;/code&gt; and the data selector &lt;code&gt;ds&lt;/code&gt; still have the values from the old GDT. To update them, we need to load them with the GDT offset (in bytes) of the desired segment. In our case the code segment starts at byte 8 of the GDT and the data segment at byte 16. Let&amp;rsquo;s try it:&lt;/p&gt;
-&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-nasm&#34; data-lang=&#34;nasm&#34;&gt;&lt;span&gt;&lt;/span&gt;    &lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;lgdt&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;[&lt;/span&gt;&lt;span class=&#34;nv&#34;&gt;gdt64.pointer&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;]&lt;/span&gt;
-
-    &lt;span class=&#34;c1&#34;&gt;; update selectors&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;mi&#34;&gt;16&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ss&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;  &lt;span class=&#34;c1&#34;&gt;; stack selector&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ds&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;  &lt;span class=&#34;c1&#34;&gt;; data selector&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;es&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;  &lt;span class=&#34;c1&#34;&gt;; extra selector&lt;/span&gt;
-
-    &lt;span class=&#34;c1&#34;&gt;; print `OK` to screen&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-
-&lt;p&gt;It should still work. The segment selectors are only 16-bits large, so we use the 16-bit &lt;code&gt;ax&lt;/code&gt; subregister. Notice that we didn&amp;rsquo;t update the code selector &lt;code&gt;cs&lt;/code&gt;. We will do that later. First we should replace this hardcoded &lt;code&gt;16&lt;/code&gt; by adding some labels to our GDT:&lt;/p&gt;
+&lt;p&gt;When you still see the green &lt;code&gt;OK&lt;/code&gt;, everything went fine and the new GDT is loaded. But we still can&amp;rsquo;t execute 64-bit code: The code selector register &lt;code&gt;cs&lt;/code&gt; still has the values from the old GDT. To update it, we need to load it with the GDT offset (in bytes) of the desired segment. In our case the code segment starts at byte 8 of the GDT, but we don&amp;rsquo;t want to hardcode that 8 (in case we modify our GDT later). Instead, we add a &lt;code&gt;.code&lt;/code&gt; label to our GDT, that calculates the offset directly from the GDT:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-nasm&#34; data-lang=&#34;nasm&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;k&#34;&gt;section&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;.rodata&lt;/span&gt;
 &lt;span class=&#34;nl&#34;&gt;gdt64:&lt;/span&gt;
     &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;mi&#34;&gt;0&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; zero entry&lt;/span&gt;
 &lt;span class=&#34;nl&#34;&gt;.code:&lt;/span&gt; &lt;span class=&#34;nf&#34;&gt;equ&lt;/span&gt; &lt;span class=&#34;kc&#34;&gt;$&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;-&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;gdt64&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; new&lt;/span&gt;
     &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;44&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;47&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;41&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;43&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;53&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; code segment&lt;/span&gt;
-&lt;span class=&#34;nl&#34;&gt;.data:&lt;/span&gt; &lt;span class=&#34;nf&#34;&gt;equ&lt;/span&gt; &lt;span class=&#34;kc&#34;&gt;$&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;-&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;gdt64&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; new&lt;/span&gt;
-    &lt;span class=&#34;kd&#34;&gt;dq&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;44&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;47&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;o&#34;&gt;|&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;(&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;1&lt;/span&gt;&lt;span class=&#34;o&#34;&gt;&amp;lt;&amp;lt;&lt;/span&gt;&lt;span class=&#34;mi&#34;&gt;41&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;)&lt;/span&gt; &lt;span class=&#34;c1&#34;&gt;; data segment&lt;/span&gt;
 &lt;span class=&#34;nl&#34;&gt;.pointer:&lt;/span&gt;
     &lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 
-&lt;p&gt;We can&amp;rsquo;t just use normal labels here, as we need the table offset. We calculate this offset using the current address &lt;code&gt;$&lt;/code&gt; and set the labels to this value using &lt;a href=&#34;http://www.nasm.us/doc/nasmdoc3.html#section-3.2.4&#34;&gt;equ&lt;/a&gt;. Now we can use &lt;code&gt;gdt64.data&lt;/code&gt; instead of 16 and &lt;code&gt;gdt64.code&lt;/code&gt; instead of 8 and these labels will still work if we modify the GDT.&lt;/p&gt;
+&lt;p&gt;We can&amp;rsquo;t just use a normal label here, since we need the table &lt;em&gt;offset&lt;/em&gt;. We calculate this offset using the current address &lt;code&gt;$&lt;/code&gt; and set the label to this value using &lt;a href=&#34;http://www.nasm.us/doc/nasmdoc3.html#section-3.2.4&#34;&gt;equ&lt;/a&gt;. Now we can use &lt;code&gt;gdt64.code&lt;/code&gt; instead of 8 and this label will still work if we modify the GDT.&lt;/p&gt;
 
-&lt;p&gt;Now there is just one last step left to enter the true 64-bit mode: We need to load &lt;code&gt;cs&lt;/code&gt; with &lt;code&gt;gdt64.code&lt;/code&gt;. But we can&amp;rsquo;t do it through &lt;code&gt;mov&lt;/code&gt;. The only way to reload the code selector is a &lt;em&gt;far jump&lt;/em&gt; or a &lt;em&gt;far return&lt;/em&gt;. These instructions work like a normal jump/return but change the code selector. We use a far jump to a long mode label:&lt;/p&gt;
+&lt;p&gt;In order to finally enter the true 64-bit mode, we need to load &lt;code&gt;cs&lt;/code&gt; with &lt;code&gt;gdt64.code&lt;/code&gt;. But we can&amp;rsquo;t do it through &lt;code&gt;mov&lt;/code&gt;. The only way to reload the code selector is a &lt;em&gt;far jump&lt;/em&gt; or a &lt;em&gt;far return&lt;/em&gt;. These instructions work like a normal jump/return but change the code selector. We use a far jump to a long mode label:&lt;/p&gt;
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-nasm&#34; data-lang=&#34;nasm&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;k&#34;&gt;global&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;start&lt;/span&gt;
 &lt;span class=&#34;k&#34;&gt;extern&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;long_mode_start&lt;/span&gt;
 &lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
 &lt;span class=&#34;nl&#34;&gt;start:&lt;/span&gt;
     &lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
     &lt;span class=&#34;nf&#34;&gt;lgdt&lt;/span&gt; &lt;span class=&#34;p&#34;&gt;[&lt;/span&gt;&lt;span class=&#34;nv&#34;&gt;gdt64.pointer&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;]&lt;/span&gt;
-
-    &lt;span class=&#34;c1&#34;&gt;; update selectors&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;gdt64.data&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ss&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ds&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;
-    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;es&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;
 
     &lt;span class=&#34;nf&#34;&gt;jmp&lt;/span&gt; &lt;span class=&#34;nv&#34;&gt;gdt64.code&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;:&lt;/span&gt;&lt;span class=&#34;nv&#34;&gt;long_mode_start&lt;/span&gt;
 &lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
@@ -8009,9 +7956,27 @@ The Global Descriptor Table (GDT) was used for &lt;em&gt;Segmentation&lt;/em&gt;
 
 &lt;p&gt;&lt;em&gt;Congratulations&lt;/em&gt;! You have successfully wrestled through this CPU configuration and compatibility mode mess :).&lt;/p&gt;
 
+&lt;h4 id=&#34;one-last-thing&#34;&gt;One Last Thing&lt;/h4&gt;
+
+&lt;p&gt;Above, we reloaded the code segment register &lt;code&gt;cs&lt;/code&gt; with the new GDT offset. However, the data segment registers &lt;code&gt;ss&lt;/code&gt;, &lt;code&gt;ds&lt;/code&gt;, &lt;code&gt;es&lt;/code&gt;, &lt;code&gt;fs&lt;/code&gt;, and &lt;code&gt;gs&lt;/code&gt; still contain the data segment offsets of the old GDT. This isn&amp;rsquo;t necessarily bad, since they&amp;rsquo;re ignored by almost all instructions in 64-bit mode. However, there are a few instructions that expect a valid data segment descriptor &lt;em&gt;or the null descriptor&lt;/em&gt; in those registers. An example is the the &lt;a href=&#34;http://os.phil-opp.com/returning-from-exceptions.html#the-iretq-instruction&#34;&gt;iretq&lt;/a&gt; instruction that we&amp;rsquo;ll need in the &lt;a href=&#34;http://os.phil-opp.com/returning-from-exceptions.html&#34;&gt;&lt;em&gt;Returning from Exceptions&lt;/em&gt;&lt;/a&gt; post.&lt;/p&gt;
+
+&lt;p&gt;To avoid future problems, we reload all data segment registers with null:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre&gt;&lt;code class=&#34;language-nasm&#34; data-lang=&#34;nasm&#34;&gt;&lt;span&gt;&lt;/span&gt;&lt;span class=&#34;nl&#34;&gt;long_mode_start:&lt;/span&gt;
+    &lt;span class=&#34;c1&#34;&gt;; load 0 into all data segment registers&lt;/span&gt;
+    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;mi&#34;&gt;0&lt;/span&gt;
+    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ss&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;
+    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ds&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;
+    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;es&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;
+    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;fs&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;
+    &lt;span class=&#34;nf&#34;&gt;mov&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;gs&lt;/span&gt;&lt;span class=&#34;p&#34;&gt;,&lt;/span&gt; &lt;span class=&#34;nb&#34;&gt;ax&lt;/span&gt;
+
+    &lt;span class=&#34;c1&#34;&gt;; print `OKAY` to screen&lt;/span&gt;
+    &lt;span class=&#34;nf&#34;&gt;...&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
 &lt;h2 id=&#34;what-s-next&#34;&gt;What&amp;rsquo;s next?&lt;/h2&gt;
 
-&lt;p&gt;It&amp;rsquo;s time to finally leave assembly behind&lt;sup class=&#34;footnote-ref&#34; id=&#34;fnref:leave-assembly-behind&#34;&gt;&lt;a rel=&#34;footnote&#34; href=&#34;#fn:leave-assembly-behind&#34;&gt;4&lt;/a&gt;&lt;/sup&gt; and switch to some higher level language. We won&amp;rsquo;t use C or C++ (not even a single line). Instead we will use the relatively new &lt;a href=&#34;https://www.rust-lang.org/&#34;&gt;Rust&lt;/a&gt; language. It&amp;rsquo;s a systems language without garbage collections but with guaranteed memory safety. Through a real type system and many abstractions it feels like a high-level language but can still be low-level enough for OS development. The &lt;a href=&#34;http://os.phil-opp.com/set-up-rust.html&#34;&gt;next post&lt;/a&gt; describes the Rust setup.&lt;/p&gt;
+&lt;p&gt;It&amp;rsquo;s time to finally leave assembly behind and switch to &lt;a href=&#34;https://www.rust-lang.org/&#34;&gt;Rust&lt;/a&gt;. Rust is a systems language without garbage collections that guarantees memory safety. Through a real type system and many abstractions it feels like a high-level language but can still be low-level enough for OS development. The &lt;a href=&#34;http://os.phil-opp.com/set-up-rust.html&#34;&gt;next post&lt;/a&gt; describes the Rust setup.&lt;/p&gt;
 &lt;div class=&#34;footnotes&#34;&gt;
 
 &lt;hr /&gt;
@@ -8023,8 +7988,6 @@ The Global Descriptor Table (GDT) was used for &lt;em&gt;Segmentation&lt;/em&gt;
  &lt;a class=&#34;footnote-return&#34; href=&#34;#fnref:virtual-physical-translation-source&#34;&gt;&lt;sup&gt;[return]&lt;/sup&gt;&lt;/a&gt;&lt;/li&gt;
 &lt;li id=&#34;fn:page-table-alignment&#34;&gt;Page tables need to be page-aligned as the bits 0-11 are used for flags. By putting these tables at the beginning of &lt;code&gt;.bss&lt;/code&gt;, the linker can just page align the whole section and we don&amp;rsquo;t have unused padding bytes in between.
  &lt;a class=&#34;footnote-return&#34; href=&#34;#fnref:page-table-alignment&#34;&gt;&lt;sup&gt;[return]&lt;/sup&gt;&lt;/a&gt;&lt;/li&gt;
-&lt;li id=&#34;fn:leave-assembly-behind&#34;&gt;Actually we will still need some assembly in the future, but I&amp;rsquo;ll try to minimize it.
- &lt;a class=&#34;footnote-return&#34; href=&#34;#fnref:leave-assembly-behind&#34;&gt;&lt;sup&gt;[return]&lt;/sup&gt;&lt;/a&gt;&lt;/li&gt;
 &lt;/ol&gt;
 &lt;/div&gt;
 </description>

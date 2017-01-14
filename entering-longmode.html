@@ -482,12 +482,12 @@
 
 <h2 id="the-global-descriptor-table">The Global Descriptor Table</h2>
 
-<p>After enabling Paging, the processor is in long mode. So we can use 64-bit instructions now, right? Wrong. The processor is still in some 32-bit compatibility submode. To actually execute 64-bit code, we need to set up a new Global Descriptor Table.
+<p>After enabling Paging, the processor is in long mode. So we can use 64-bit instructions now, right? Wrong. The processor is still in a 32-bit compatibility submode. To actually execute 64-bit code, we need to set up a new Global Descriptor Table.
 The Global Descriptor Table (GDT) was used for <em>Segmentation</em> in old operating systems. I won&rsquo;t explain Segmentation but the <a href="http://pages.cs.wisc.edu/~remzi/OSTEP/">Three Easy Pieces</a> OS book has good introduction (<a href="http://pages.cs.wisc.edu/~remzi/OSTEP/vm-segmentation.pdf">PDF</a>) again.</p>
 
 <p>Today almost everyone uses Paging instead of Segmentation (and so do we). But on x86, a GDT is always required, even when you&rsquo;re not using Segmentation. GRUB has set up a valid 32-bit GDT for us but now we need to switch to a long mode GDT.</p>
 
-<p>A GDT always starts with a 0-entry and contains an arbitrary number of segment entries afterwards. An entry has the following format:</p>
+<p>A GDT always starts with a 0-entry and contains an arbitrary number of segment entries afterwards. A 64-bit entry has the following format:</p>
 
 <table>
 <thead>
@@ -500,33 +500,15 @@ The Global Descriptor Table (GDT) was used for <em>Segmentation</em> in old oper
 
 <tbody>
 <tr>
-<td>0-15</td>
-<td>limit 0-15</td>
-<td>the first 2 byte of the segment&rsquo;s limit</td>
-</tr>
-
-<tr>
-<td>16-39</td>
-<td>base 0-23</td>
-<td>the first 3 byte of the segment&rsquo;s base address</td>
-</tr>
-
-<tr>
-<td>40</td>
-<td>accessed</td>
-<td>set by the CPU when the segment is accessed</td>
-</tr>
-
-<tr>
-<td>41</td>
-<td>read/write</td>
-<td>reads allowed for code segments / writes allowed for data segments</td>
+<td>0-41</td>
+<td>ignored</td>
+<td>ignored in 64-bit mode</td>
 </tr>
 
 <tr>
 <td>42</td>
-<td>direction/conforming</td>
-<td>the segment grows down (i.e. base&gt;limit) for data segments / the current privilege level can be higher than the specified level for code segments (else it must match exactly)</td>
+<td>conforming</td>
+<td>the current privilege level can be higher than the specified level for code segments (else it must match exactly)</td>
 </tr>
 
 <tr>
@@ -554,15 +536,9 @@ The Global Descriptor Table (GDT) was used for <em>Segmentation</em> in old oper
 </tr>
 
 <tr>
-<td>48-51</td>
-<td>limit 16-19</td>
-<td>bits 16 to 19 of the segment&rsquo;s limit</td>
-</tr>
-
-<tr>
-<td>52</td>
-<td>available</td>
-<td>freely available to the OS</td>
+<td>48-52</td>
+<td>ignored</td>
+<td>ignored in 64-bit mode</td>
 </tr>
 
 <tr>
@@ -574,39 +550,32 @@ The Global Descriptor Table (GDT) was used for <em>Segmentation</em> in old oper
 <tr>
 <td>54</td>
 <td>32-bit</td>
-<td>should be set for 32-bit segments</td>
+<td>must be 0 for 64-bit segments</td>
 </tr>
 
 <tr>
-<td>55</td>
-<td>granularity</td>
-<td>if it&rsquo;s set, the limit is the number of pages, else it&rsquo;s a byte number</td>
-</tr>
-
-<tr>
-<td>56-63</td>
-<td>base 24-31</td>
-<td>the last byte of the base address</td>
+<td>55-63</td>
+<td>ignored</td>
+<td>ignored in 64-bit mode</td>
 </tr>
 </tbody>
 </table>
 
-<p>We need one code and one data segment. They have the following bits set: <em>descriptor type</em>, <em>present</em>, and <em>read/write</em>. The code segment has additionally the <em>executable</em> and the <em>64-bit</em> flag. In Long mode, it&rsquo;s not possible to actually use the GDT entries for Segmentation and thus the base and limit fields must be 0. Translated to assembly the long mode GDT looks like this:</p>
+<p>We need one code segment, a data segment is not necessary in 64-bit mode. Code segments have the following bits set: <em>descriptor type</em>, <em>present</em>, <em>executable</em> and the <em>64-bit</em> flag. Translated to assembly the long mode GDT looks like this:</p>
 <div class="highlight"><pre><code class="language-nasm" data-lang="nasm"><span></span><span class="k">section</span> <span class="nv">.rodata</span>
 <span class="nl">gdt64:</span>
     <span class="kd">dq</span> <span class="mi">0</span> <span class="c1">; zero entry</span>
-    <span class="kd">dq</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">44</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">47</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">41</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">43</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">53</span><span class="p">)</span> <span class="c1">; code segment</span>
-    <span class="kd">dq</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">44</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">47</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">41</span><span class="p">)</span> <span class="c1">; data segment</span>
+    <span class="kd">dq</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">43</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">44</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">47</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">53</span><span class="p">)</span> <span class="c1">; code segment</span>
 </code></pre></div>
 
-<p>We chose the <code>.rodata</code> section here because it&rsquo;s initialized read-only data. The <code>dq</code> command stands for <code>define quad</code> and outputs a 64-bit constant (similar to <code>dw</code> and <code>dd</code>). And the <code>(1&lt;&lt;44)</code> is a <a href="http://www.cs.umd.edu/class/sum2003/cmsc311/Notes/BitOp/bitshift.html">bit shift</a> that sets bit 44.</p>
+<p>We chose the <code>.rodata</code> section here because it&rsquo;s initialized read-only data. The <code>dq</code> command stands for <code>define quad</code> and outputs a 64-bit constant (similar to <code>dw</code> and <code>dd</code>). And the <code>(1&lt;&lt;43)</code> is a <a href="http://www.cs.umd.edu/class/sum2003/cmsc311/Notes/BitOp/bitshift.html">bit shift</a> that sets bit 43.</p>
 
 <h3 id="loading-the-gdt">Loading the GDT</h3>
 
 <p>To load our new 64-bit GDT, we have to tell the CPU its address and length. We do this by passing the memory location of a special pointer structure to the <code>lgdt</code> (load GDT) instruction. The pointer structure looks like this:</p>
 <div class="highlight"><pre><code class="language-nasm" data-lang="nasm"><span></span><span class="nl">gdt64:</span>
-    <span class="nf">...</span>
-    <span class="kd">dq</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">44</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">47</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">41</span><span class="p">)</span> <span class="c1">; data segment</span>
+    <span class="kd">dq</span> <span class="mi">0</span> <span class="c1">; zero entry</span>
+    <span class="kd">dq</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">43</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">44</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">47</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">53</span><span class="p">)</span> <span class="c1">; code segment</span>
 <span class="nl">.pointer:</span>
     <span class="kd">dw</span> <span class="kc">$</span> <span class="o">-</span> <span class="nv">gdt64</span> <span class="o">-</span> <span class="mi">1</span>
     <span class="kd">dq</span> <span class="nv">gdt64</span>
@@ -626,47 +595,25 @@ The Global Descriptor Table (GDT) was used for <em>Segmentation</em> in old oper
     <span class="nf">...</span>
 </code></pre></div>
 
-<p>When you still see the green <code>OK</code>, everything went fine and the new GDT is loaded. But we still can&rsquo;t execute 64-bit code: The selector registers such as the code selector <code>cs</code> and the data selector <code>ds</code> still have the values from the old GDT. To update them, we need to load them with the GDT offset (in bytes) of the desired segment. In our case the code segment starts at byte 8 of the GDT and the data segment at byte 16. Let&rsquo;s try it:</p>
-<div class="highlight"><pre><code class="language-nasm" data-lang="nasm"><span></span>    <span class="nf">...</span>
-    <span class="nf">lgdt</span> <span class="p">[</span><span class="nv">gdt64.pointer</span><span class="p">]</span>
-
-    <span class="c1">; update selectors</span>
-    <span class="nf">mov</span> <span class="nb">ax</span><span class="p">,</span> <span class="mi">16</span>
-    <span class="nf">mov</span> <span class="nb">ss</span><span class="p">,</span> <span class="nb">ax</span>  <span class="c1">; stack selector</span>
-    <span class="nf">mov</span> <span class="nb">ds</span><span class="p">,</span> <span class="nb">ax</span>  <span class="c1">; data selector</span>
-    <span class="nf">mov</span> <span class="nb">es</span><span class="p">,</span> <span class="nb">ax</span>  <span class="c1">; extra selector</span>
-
-    <span class="c1">; print `OK` to screen</span>
-    <span class="nf">...</span>
-</code></pre></div>
-
-<p>It should still work. The segment selectors are only 16-bits large, so we use the 16-bit <code>ax</code> subregister. Notice that we didn&rsquo;t update the code selector <code>cs</code>. We will do that later. First we should replace this hardcoded <code>16</code> by adding some labels to our GDT:</p>
+<p>When you still see the green <code>OK</code>, everything went fine and the new GDT is loaded. But we still can&rsquo;t execute 64-bit code: The code selector register <code>cs</code> still has the values from the old GDT. To update it, we need to load it with the GDT offset (in bytes) of the desired segment. In our case the code segment starts at byte 8 of the GDT, but we don&rsquo;t want to hardcode that 8 (in case we modify our GDT later). Instead, we add a <code>.code</code> label to our GDT, that calculates the offset directly from the GDT:</p>
 <div class="highlight"><pre><code class="language-nasm" data-lang="nasm"><span></span><span class="k">section</span> <span class="nv">.rodata</span>
 <span class="nl">gdt64:</span>
     <span class="kd">dq</span> <span class="mi">0</span> <span class="c1">; zero entry</span>
 <span class="nl">.code:</span> <span class="nf">equ</span> <span class="kc">$</span> <span class="o">-</span> <span class="nv">gdt64</span> <span class="c1">; new</span>
     <span class="kd">dq</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">44</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">47</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">41</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">43</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">53</span><span class="p">)</span> <span class="c1">; code segment</span>
-<span class="nl">.data:</span> <span class="nf">equ</span> <span class="kc">$</span> <span class="o">-</span> <span class="nv">gdt64</span> <span class="c1">; new</span>
-    <span class="kd">dq</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">44</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">47</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">41</span><span class="p">)</span> <span class="c1">; data segment</span>
 <span class="nl">.pointer:</span>
     <span class="nf">...</span>
 </code></pre></div>
 
-<p>We can&rsquo;t just use normal labels here, as we need the table offset. We calculate this offset using the current address <code>$</code> and set the labels to this value using <a href="http://www.nasm.us/doc/nasmdoc3.html#section-3.2.4">equ</a>. Now we can use <code>gdt64.data</code> instead of 16 and <code>gdt64.code</code> instead of 8 and these labels will still work if we modify the GDT.</p>
+<p>We can&rsquo;t just use a normal label here, since we need the table <em>offset</em>. We calculate this offset using the current address <code>$</code> and set the label to this value using <a href="http://www.nasm.us/doc/nasmdoc3.html#section-3.2.4">equ</a>. Now we can use <code>gdt64.code</code> instead of 8 and this label will still work if we modify the GDT.</p>
 
-<p>Now there is just one last step left to enter the true 64-bit mode: We need to load <code>cs</code> with <code>gdt64.code</code>. But we can&rsquo;t do it through <code>mov</code>. The only way to reload the code selector is a <em>far jump</em> or a <em>far return</em>. These instructions work like a normal jump/return but change the code selector. We use a far jump to a long mode label:</p>
+<p>In order to finally enter the true 64-bit mode, we need to load <code>cs</code> with <code>gdt64.code</code>. But we can&rsquo;t do it through <code>mov</code>. The only way to reload the code selector is a <em>far jump</em> or a <em>far return</em>. These instructions work like a normal jump/return but change the code selector. We use a far jump to a long mode label:</p>
 <div class="highlight"><pre><code class="language-nasm" data-lang="nasm"><span></span><span class="k">global</span> <span class="nv">start</span>
 <span class="k">extern</span> <span class="nv">long_mode_start</span>
 <span class="nf">...</span>
 <span class="nl">start:</span>
     <span class="nf">...</span>
     <span class="nf">lgdt</span> <span class="p">[</span><span class="nv">gdt64.pointer</span><span class="p">]</span>
-
-    <span class="c1">; update selectors</span>
-    <span class="nf">mov</span> <span class="nb">ax</span><span class="p">,</span> <span class="nv">gdt64.data</span>
-    <span class="nf">mov</span> <span class="nb">ss</span><span class="p">,</span> <span class="nb">ax</span>
-    <span class="nf">mov</span> <span class="nb">ds</span><span class="p">,</span> <span class="nb">ax</span>
-    <span class="nf">mov</span> <span class="nb">es</span><span class="p">,</span> <span class="nb">ax</span>
 
     <span class="nf">jmp</span> <span class="nv">gdt64.code</span><span class="p">:</span><span class="nv">long_mode_start</span>
 <span class="nf">...</span>
@@ -696,9 +643,27 @@ The Global Descriptor Table (GDT) was used for <em>Segmentation</em> in old oper
 
 <p><em>Congratulations</em>! You have successfully wrestled through this CPU configuration and compatibility mode mess :).</p>
 
+<h4 id="one-last-thing">One Last Thing</h4>
+
+<p>Above, we reloaded the code segment register <code>cs</code> with the new GDT offset. However, the data segment registers <code>ss</code>, <code>ds</code>, <code>es</code>, <code>fs</code>, and <code>gs</code> still contain the data segment offsets of the old GDT. This isn&rsquo;t necessarily bad, since they&rsquo;re ignored by almost all instructions in 64-bit mode. However, there are a few instructions that expect a valid data segment descriptor <em>or the null descriptor</em> in those registers. An example is the the <a href="/returning-from-exceptions.html#the-iretq-instruction">iretq</a> instruction that we&rsquo;ll need in the <a href="/returning-from-exceptions.html"><em>Returning from Exceptions</em></a> post.</p>
+
+<p>To avoid future problems, we reload all data segment registers with null:</p>
+<div class="highlight"><pre><code class="language-nasm" data-lang="nasm"><span></span><span class="nl">long_mode_start:</span>
+    <span class="c1">; load 0 into all data segment registers</span>
+    <span class="nf">mov</span> <span class="nb">ax</span><span class="p">,</span> <span class="mi">0</span>
+    <span class="nf">mov</span> <span class="nb">ss</span><span class="p">,</span> <span class="nb">ax</span>
+    <span class="nf">mov</span> <span class="nb">ds</span><span class="p">,</span> <span class="nb">ax</span>
+    <span class="nf">mov</span> <span class="nb">es</span><span class="p">,</span> <span class="nb">ax</span>
+    <span class="nf">mov</span> <span class="nb">fs</span><span class="p">,</span> <span class="nb">ax</span>
+    <span class="nf">mov</span> <span class="nb">gs</span><span class="p">,</span> <span class="nb">ax</span>
+
+    <span class="c1">; print `OKAY` to screen</span>
+    <span class="nf">...</span>
+</code></pre></div>
+
 <h2 id="what-s-next">What&rsquo;s next?</h2>
 
-<p>It&rsquo;s time to finally leave assembly behind<sup class="footnote-ref" id="fnref:leave-assembly-behind"><a rel="footnote" href="#fn:leave-assembly-behind">4</a></sup> and switch to some higher level language. We won&rsquo;t use C or C++ (not even a single line). Instead we will use the relatively new <a href="https://www.rust-lang.org/">Rust</a> language. It&rsquo;s a systems language without garbage collections but with guaranteed memory safety. Through a real type system and many abstractions it feels like a high-level language but can still be low-level enough for OS development. The <a href="/set-up-rust.html">next post</a> describes the Rust setup.</p>
+<p>It&rsquo;s time to finally leave assembly behind and switch to <a href="https://www.rust-lang.org/">Rust</a>. Rust is a systems language without garbage collections that guarantees memory safety. Through a real type system and many abstractions it feels like a high-level language but can still be low-level enough for OS development. The <a href="/set-up-rust.html">next post</a> describes the Rust setup.</p>
 <div class="footnotes">
 
 <hr />
@@ -710,8 +675,6 @@ The Global Descriptor Table (GDT) was used for <em>Segmentation</em> in old oper
  <a class="footnote-return" href="#fnref:virtual-physical-translation-source"><sup>[return]</sup></a></li>
 <li id="fn:page-table-alignment">Page tables need to be page-aligned as the bits 0-11 are used for flags. By putting these tables at the beginning of <code>.bss</code>, the linker can just page align the whole section and we don&rsquo;t have unused padding bytes in between.
  <a class="footnote-return" href="#fnref:page-table-alignment"><sup>[return]</sup></a></li>
-<li id="fn:leave-assembly-behind">Actually we will still need some assembly in the future, but I&rsquo;ll try to minimize it.
- <a class="footnote-return" href="#fnref:leave-assembly-behind"><sup>[return]</sup></a></li>
 </ol>
 </div>
 
