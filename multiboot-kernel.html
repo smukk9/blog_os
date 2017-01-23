@@ -375,7 +375,7 @@ menuentry &quot;my os&quot; {
 	@mkdir -p build/isofiles/boot/grub
 	@cp <span class="k">$(</span>kernel<span class="k">)</span> build/isofiles/boot/kernel.bin
 	@cp <span class="k">$(</span>grub_cfg<span class="k">)</span> build/isofiles/boot/grub
-	@grub-mkrescue -o <span class="k">$(</span>iso<span class="k">)</span> build/isofiles 2&gt; /dev/null
+	@grub-mkrescue -o <span class="k">$(</span>iso<span class="k">)</span> build/isofiles <span class="m">2</span>&gt; /dev/null
 	@rm -r build/isofiles
 
 <span class="nf">$(kernel)</span><span class="o">:</span> <span class="k">$(</span><span class="nv">assembly_object_files</span><span class="k">)</span> <span class="k">$(</span><span class="nv">linker_script</span><span class="k">)</span>

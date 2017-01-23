@@ -109,10 +109,10 @@
 <span class="cp">#![no_std]</span><span class="w"></span>
 
 <span class="cp">#[no_mangle]</span><span class="w"></span>
-<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">rust_main</span><span class="p">()</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span> <span class="nf">rust_main</span><span class="p">()</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
 
-<span class="cp">#[lang = </span><span class="s">&quot;eh_personality&quot;</span><span class="cp">]</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">eh_personality</span><span class="p">()</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
-<span class="cp">#[lang = </span><span class="s">&quot;panic_fmt&quot;</span><span class="cp">]</span><span class="w"> </span><span class="cp">#[no_mangle]</span><span class="w"> </span><span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">panic_fmt</span><span class="p">()</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="k">loop</span><span class="p">{}}</span><span class="w"></span>
+<span class="cp">#[lang = </span><span class="s">&quot;eh_personality&quot;</span><span class="cp">]</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span> <span class="nf">eh_personality</span><span class="p">()</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
+<span class="cp">#[lang = </span><span class="s">&quot;panic_fmt&quot;</span><span class="cp">]</span><span class="w"> </span><span class="cp">#[no_mangle]</span><span class="w"> </span><span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span> <span class="nf">panic_fmt</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="k">loop</span><span class="p">{}}</span><span class="w"></span>
 </code></pre></div>
 
 <p>Let&rsquo;s break it down:</p>
@@ -178,7 +178,7 @@
 <h2 id="fixing-linker-errors">Fixing Linker Errors</h2>
 
 <p>Now we can try some Rust code:</p>
-<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">rust_main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span> <span class="nf">rust_main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s">&quot;Hello&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;World&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;!&quot;</span><span class="p">];</span><span class="w"></span>
 <span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="p">;</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
@@ -199,7 +199,7 @@
 <span class="k">extern</span><span class="w"> </span><span class="k">crate</span><span class="w"> </span><span class="n">rlibc</span><span class="p">;</span><span class="w"></span>
 
 <span class="cp">#[no_mangle]</span><span class="w"></span>
-<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">rust_main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span> <span class="nf">rust_main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="p">...</span><span class="w"></span>
 </code></pre></div>
 
@@ -280,7 +280,7 @@ target/debug/libblog_os.a(core-35017696.0.o):
 
 <span class="cp">#[allow(non_snake_case)]</span><span class="w"></span>
 <span class="cp">#[no_mangle]</span><span class="w"></span>
-<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">_Unwind_Resume</span><span class="p">()</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="k">fn</span> <span class="nf">_Unwind_Resume</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="k">loop</span><span class="w"> </span><span class="p">{}</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </code></pre></div>
@@ -387,7 +387,7 @@ check_exception old: 0x8 new 0xd
 <h2 id="hello-world">Hello World!</h2>
 
 <p>Finally, it&rsquo;s time for a <code>Hello World!</code> from Rust:</p>
-<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="n">rust_main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="k">fn</span> <span class="nf">rust_main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="c1">// ATTENTION: we have a very small stack and no guard page</span>
 
 <span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">hello</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">b&quot;Hello World!&quot;</span><span class="p">;</span><span class="w"></span>
