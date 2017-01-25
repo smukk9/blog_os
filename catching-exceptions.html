@@ -289,7 +289,7 @@
 </code></pre></div>
 
 <p>Well, none of these variants is really <em>readable</em> and it&rsquo;s very easy to make mistakes somewhere. Therefore I created a <code>BitField</code> trait that provides the following <a href="https://doc.rust-lang.org/nightly/core/ops/struct.Range.html">Range</a>-based API:</p>
-<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="bp">self</span><span class="p">.</span><span class="mf">0.</span><span class="n">set_range</span><span class="p">(</span><span class="mi">0</span><span class="p">..</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="n">stack_index</span><span class="p">);</span><span class="w"></span>
+<div class="highlight"><pre><code class="language-rust" data-lang="rust"><span></span><span class="bp">self</span><span class="p">.</span><span class="mf">0.</span><span class="n">set_bits</span><span class="p">(</span><span class="mi">0</span><span class="p">..</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="n">stack_index</span><span class="p">);</span><span class="w"></span>
 </code></pre></div>
 
 <p>I think it is much more readable, since we abstracted away all bit-masking details. The <code>BitField</code> trait is contained in the <a href="https://crates.io/crates/bit_field">bit_field</a> crate. (It&rsquo;s pretty new, so it might still contain bugs.) To add it as dependency, we run <code>cargo add bit_field</code> and add <code>extern crate bit_field;</code> to our <code>src/lib.rs</code>.</p>
@@ -305,7 +305,7 @@
 <span class="k">impl</span><span class="w"> </span><span class="n">EntryOptions</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">    </span><span class="k">fn</span> <span class="nf">minimal</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="nc">Self</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
 <span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">options</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
-<span class="w">        </span><span class="n">options</span><span class="p">.</span><span class="n">set_range</span><span class="p">(</span><span class="mi">9</span><span class="p">..</span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="mb">0b111</span><span class="p">);</span><span class="w"> </span><span class="c1">// &#39;must-be-one&#39; bits</span>
+<span class="w">        </span><span class="n">options</span><span class="p">.</span><span class="n">set_bits</span><span class="p">(</span><span class="mi">9</span><span class="p">..</span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="mb">0b111</span><span class="p">);</span><span class="w"> </span><span class="c1">// &#39;must-be-one&#39; bits</span>
 <span class="w">        </span><span class="n">EntryOptions</span><span class="p">(</span><span class="n">options</span><span class="p">)</span><span class="w"></span>
 <span class="w">    </span><span class="p">}</span><span class="w"></span>
 
@@ -326,12 +326,12 @@
 <span class="w">    </span><span class="p">}</span><span class="w"></span>
 
 <span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">set_privilege_level</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">dpl</span>: <span class="kt">u16</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kp">&amp;</span><span class="nc">mut</span><span class="w"> </span><span class="n">Self</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="bp">self</span><span class="p">.</span><span class="mf">0.</span><span class="n">set_range</span><span class="p">(</span><span class="mi">13</span><span class="p">..</span><span class="mi">15</span><span class="p">,</span><span class="w"> </span><span class="n">dpl</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="bp">self</span><span class="p">.</span><span class="mf">0.</span><span class="n">set_bits</span><span class="p">(</span><span class="mi">13</span><span class="p">..</span><span class="mi">15</span><span class="p">,</span><span class="w"> </span><span class="n">dpl</span><span class="p">);</span><span class="w"></span>
 <span class="w">        </span><span class="bp">self</span><span class="w"></span>
 <span class="w">    </span><span class="p">}</span><span class="w"></span>
 
 <span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">set_stack_index</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">index</span>: <span class="kt">u16</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kp">&amp;</span><span class="nc">mut</span><span class="w"> </span><span class="n">Self</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="bp">self</span><span class="p">.</span><span class="mf">0.</span><span class="n">set_range</span><span class="p">(</span><span class="mi">0</span><span class="p">..</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="n">index</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="bp">self</span><span class="p">.</span><span class="mf">0.</span><span class="n">set_bits</span><span class="p">(</span><span class="mi">0</span><span class="p">..</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="n">index</span><span class="p">);</span><span class="w"></span>
 <span class="w">        </span><span class="bp">self</span><span class="w"></span>
 <span class="w">    </span><span class="p">}</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
