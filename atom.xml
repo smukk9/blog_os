@@ -1162,7 +1162,7 @@ error: `gdt` does not live long enough
 
 &lt;p&gt;The &lt;code&gt;iretq&lt;/code&gt; instruction is the one and only way to return from exceptions and is specifically designed for this purpose. The AMD64 manual (&lt;a href=&#34;https://support.amd.com/TechDocs/24594.pdf&#34;&gt;PDF&lt;/a&gt;) even demands that &lt;code&gt;iretq&lt;/code&gt; “&lt;em&gt;must&lt;/em&gt; be used to terminate the exception or interrupt handler associated with the exception”.&lt;/p&gt;
 
-&lt;p&gt;IRETQ restores &lt;code&gt;rip&lt;/code&gt;, &lt;code&gt;cs&lt;/code&gt;, &lt;code&gt;rflags&lt;/code&gt;, &lt;code&gt;rsp&lt;/code&gt;, and &lt;code&gt;cs&lt;/code&gt; from the values saved on the stack and thus continues the interrupted program. The instruction does not handle the optional error code, so it must be popped from the stack before.&lt;/p&gt;
+&lt;p&gt;IRETQ restores &lt;code&gt;rip&lt;/code&gt;, &lt;code&gt;cs&lt;/code&gt;, &lt;code&gt;rflags&lt;/code&gt;, &lt;code&gt;rsp&lt;/code&gt;, and &lt;code&gt;ss&lt;/code&gt; from the values saved on the stack and thus continues the interrupted program. The instruction does not handle the optional error code, so it must be popped from the stack before.&lt;/p&gt;
 
 &lt;p&gt;We see that &lt;code&gt;iretq&lt;/code&gt; treats the stored instruction pointer as return address. For most exceptions, the stored &lt;code&gt;rip&lt;/code&gt; points to the instruction that caused the fault. So by executing &lt;code&gt;iretq&lt;/code&gt;, we restart the failing instruction. This makes sense because we should have resolved the exception when returning from it, so the instruction should no longer fail (e.g. the accessed part of the memory mapped file is now present in memory).&lt;/p&gt;
 
