@@ -13,6 +13,7 @@
 #![feature(asm)]
 #![feature(naked_functions)]
 #![feature(core_intrinsics)]
+#![feature(abi_x86_interrupt)]
 #![no_std]
 
 extern crate rlibc;

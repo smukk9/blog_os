@@ -10,6 +10,9 @@
 use x86::shared::segmentation::{self, SegmentSelector};
 use x86::shared::PrivilegeLevel;
 
+pub type Handler = extern "x86-interrupt" fn(&super::ExceptionStackFrame);
+pub type HandlerWithErrorCode = extern "x86-interrupt" fn(&super::ExceptionStackFrame, u64);
+
 pub struct Idt([Entry; 16]);
 
 impl Idt {
@@ -17,8 +20,13 @@ impl Idt {
         Idt([Entry::missing(); 16])
     }
 
-    pub fn set_handler(&mut self, entry: u8, handler: HandlerFunc) -> &mut EntryOptions {
-        self.0[entry as usize] = Entry::new(segmentation::cs(), handler);
+    pub fn set_handler(&mut self, entry: u8, handler: Handler) -> &mut EntryOptions {
+        self.0[entry as usize] = Entry::new(segmentation::cs(), handler as u64);
+        &mut self.0[entry as usize].options
+    }
+
+    pub fn set_handler_with_error_code(&mut self, entry: u8, handler: HandlerWithErrorCode) -> &mut EntryOptions {
+        self.0[entry as usize] = Entry::new(segmentation::cs(), handler as u64);
         &mut self.0[entry as usize].options
     }
 
@@ -46,11 +54,9 @@ pub struct Entry {
     reserved: u32,
 }
 
-pub type HandlerFunc = extern "C" fn() -> !;
 
 impl Entry {
-    fn new(gdt_selector: SegmentSelector, handler: HandlerFunc) -> Self {
-        let pointer = handler as u64;
+    fn new(gdt_selector: SegmentSelector, pointer: u64) -> Self {
         Entry {
             gdt_selector: gdt_selector,
             pointer_low: pointer as u16,
